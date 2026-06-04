@@ -1,135 +1,94 @@
-# BBB Voice Assistant - Project Plan
+# BBB Voice Assistant — Project Plan
 
-> **Beaglebone Black Voice Assistant** - thiết bị trợ lý giọng nói trên embedded Linux, tích hợp AI Local server, hiển thị trên TFT LCD SPI.
+> **BeagleBone Black Voice Assistant** — An embedded Linux voice assistant device integrating a local AI server, displayed on a SPI TFT LCD.
 
-## 📋 Tổng quan
+---
 
-### 🎯 Mục tiêu
-Xây dựng thiết bị embedded Linux hoàn chỉnh trên Beaglebone Black với:
-- **Voice Interaction:** Push-to-talk voice input, speech-to-text qua AI local.
-- **Visual Feedback:** Hiển thị trạng thái và phản hồi trên TFT LCD 320x480.
-- **Audio Output:** Text-to-speech và phát âm thanh qua speaker.
-- **Physical Controls:** Buttons cho điều khiển thủ công, LEDs cho status.
+## 📋 Overview
 
 
-## 💎 Giá trị mang lại
+### 🎯 Goals
+Build a complete embedded Linux device on BeagleBone Black with:
+- **Voice Interaction:** Push-to-talk input, speech-to-text via local AI (Whisper in LM Studio).
+- **Visual Feedback:** Status and responses on ILI9341 TFT LCD 320×240 (LVGL UI).
+- **Audio Output:** Text-to-speech via eSpeak-ng, playback via native I2S hardware (INMP441 microphone + MAX98357A DAC/amp). USB audio is a fallback for prototyping.
+- **Physical Controls:** PTT + Volume Up/Down buttons, 1 status LED.
 
-| Khía cạnh | Giá trị |
-|-----------|---------|
-| **Học tập** | Device driver, HAL design, embedded Linux system programming |
-| **Kỹ thuật** | Modern C++17, design patterns, layered architecture |
-| **Thực tế** | Production-quality code, error handling, logging, testing |
-| **Mở rộng** | Dễ thay đổi hardware, AI Backend, thêm tính năng mới |
+---
 
-               
+## 💎 Value
 
-## ⚙️ Yêu cầu kỹ thuật
+| Aspect | Value |
+|--------|-------|
+| **Learning** | Device driver dev, HAL design, embedded Linux system programming |
+| **Engineering** | Modern C++17, design patterns, layered architecture |
+| **Practical** | Production-quality code, error handling, logging, testing |
+| **Extensible** | Easy to swap hardware, AI backend, or add new features |
+
+---
+
+## ⚙️ Technical Requirements
 
 ### ✅ Functional Requirements
-| ID | Yêu cầu | Mức độ |
-|----|---------|--------|
-| FR-1 | Ghi âm khi nhấn PTT button | Must have |
-| FR-2 | Target language for voice interaction: English | Must have |
-| FR-3 | Speech-to-text qua LM Studio API | Must have |
-| FR-4 | Chat completion với AI local | Must have |
-| FR-5 | Text-to-Speech và phát âm thanh | Must have |
-| FR-6 | Hiển thị trạng thái trên LCD | Must have |
-| FR-7 | 1 LED cho status/error | Should have |
-| FR-8 | tăng/giảm volume bằng 2 nút bấm | Should have |
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-1 | Record audio while PTT button is held | Must have |
+| FR-2 | Speech-to-text via LM Studio API (Whisper) | Must have |
+| FR-3 | Chat completion with local LLM (LM Studio) | Must have |
+| FR-4 | Text-to-speech (eSpeak-ng) + audio playback | Must have |
+| FR-5 | Display status and responses on ILI9341 LCD | Must have |
+| FR-6 | Volume control via Vol+/Vol- buttons | Should have |
+| FR-7 | LED status indicator (idle / active / error) | Should have |
 
 ### 📊 Non-Functional Requirements
-| ID | Yêu cầu | Target |
-|----|---------|--------|
-| NFR-1 | Thời gian phản hồi (PTT release → TTS start) | < 5 giây |
+
+| ID | Requirement | Target |
+|----|-------------|--------|
+| NFR-1 | Response time (PTT release → TTS start) | < 5 seconds |
 | NFR-2 | RAM usage | < 200 MB |
-| NFR-3 | Boot time | < 30 giây |
+| NFR-3 | Boot time | < 30 seconds |
+| NFR-4 | Audio recording quality | 16 kHz, 16-bit mono |
 
 ### 🚧 Technical Constraints
-| Constraint | Chi tiết |
-|------------|----------|
-| **Hardware** | Beaglebone Black (512MB RAM, 4GB eMMC, 16GB SD-Card) |
-| **OS** | Debian Linux (kernel 4.x+) |
-| **Build system choice** | Buildroot |
-| **Cross-compilation host OS** | Windows WSL2 with Ubuntu 22.04 |
-| **Network** | USB connection to PC (LM Studio) |
-| **AI Server** | LM Studio trên PC riêng (OpenAI-compatible API) |
-| **Display** | SPI TFT LCD ILI9341 (320x480, RGB565) — custom driver |
-| **Button** | 2 nút tăng/giảm volume (GPIO, libgpiod) |
-| **Audio** | I2C audio codec IC (e.g. WM8960), I2S data, external mic/speaker |
 
+| Constraint | Details |
+|------------|---------|
+| **Hardware** | BeagleBone Black Rev C (512 MB RAM, 4 GB eMMC, 16 GB SD card) |
+| **OS** | Linux (kernel 5.x), custom root filesystem via Buildroot |
+| **Build System** | Buildroot — cross-compiled from WSL2 (Ubuntu 22.04 on Windows) |
+| **Network** | Local LAN only — BBB ↔ PC via Ethernet (no internet required) |
+| **AI Server** | LM Studio on separate PC (OpenAI-compatible REST API) |
+| **Display** | ILI9341 SPI TFT LCD, 320×240, RGB565 |
+| **Audio** | Native I2S: `INMP441` (I2S microphone) + `MAX98357A` (I2S DAC/amp). USB audio via `snd-usb-audio` is fallback for prototyping. |
+| **Language** | English (STT + LLM + TTS) |
+| **Dev Host** | Windows with WSL2 (Ubuntu 22.04) |
+
+---
 
 ## 🏗️ Kiến trúc được chọn
 
 ### 📐 Layered Architecture với HAL
 
-```mermaid
-flowchart TB
-   subgraph APP [APPLICATION LAYER]
-      VA[VoiceAssistant<br/>(state machine)]
-      DC[DisplayController<br/>(LVGL UI)]
-      BC[ButtonController<br/>(GPIO events)]
-   end
-
-   EB[Event Bus / IPC]
-
-   subgraph MID [MIDDLEWARE LAYER]
-      AP[AudioPipe]
-      AI[AIClient]
-      TTS[TTS Engine]
-   end
-
-   subgraph HAL [HAL LAYER (interfaces)]
-      IA[IAudioHAL]
-      ID[IDisplayHAL]
-      IG[IGPIOHAL]
-   end
-
-   subgraph HALimpl [HAL Implementations]
-      Alsa[AlsaHAL]
-      Fbdev[FbdevHAL]
-      Gpiod[GpiodHAL]
-   end
-
-   subgraph KERNEL [KERNEL / DRIVERS]
-      ALSA[ALSA subsystem]
-      SPI[SPI LCD driver]
-      GPIO[GPIO (gpiod)]
-   end
-
-   APP -->|publishes/subscribes| EB
-   EB --> MID
-   MID -->|calls| IA & ID & IG
-   IA --> Alsa
-   ID --> Fbdev
-   IG --> Gpiod
-   Alsa --> ALSA
-   Fbdev --> SPI
-   Gpiod --> GPIO
-
-   classDef layer fill:#f8f9fa,stroke:#333,stroke-width:1px;
-   class APP,MID,HAL,HALimpl,KERNEL layer;
 ```
-
-```text
-ASCII (compact):
-|-----------------------------|
-| APPLICATION LAYER           |
-| VoiceAssistant  DisplayController  ButtonController |
-|           (Event Bus)       |
-|-----------------------------|
-| MIDDLEWARE LAYER            |
-| AudioPipe  AIClient  TTS    |
-|-----------------------------|
-| HAL INTERFACES              |
-| IAudioHAL  IDisplayHAL  IGPIOHAL |
-|-----------------------------|
-| HAL IMPLEMENTATIONS         |
-| AlsaHAL  FbdevHAL  GpiodHAL |
-|-----------------------------|
-| KERNEL / DRIVERS            |
-| ALSA  SPI LCD  GPIO (gpiod) |
-|-----------------------------|
+┌─────────────────────────────────────────────────────────┐
+│                   APPLICATION LAYER                     │
+│  VoiceAssistant    DisplayController   ButtonController │
+│  (State Machine)   (LVGL UI)           (GPIO Events)    │
+│                        EVENT BUS                        │
+├─────────────────────────────────────────────────────────┤
+│                   MIDDLEWARE LAYER                      │
+│   AudioPipeline        AIClient          TTSEngine      │
+├─────────────────────────────────────────────────────────┤
+│               HAL LAYER  (shared libraries)             │
+│  IAudioHAL           IDisplayHAL       IGPIOHAL         │
+│  └─ AlsaHAL          └─ FbdevHAL       └─ GpiodHAL      │
+├─────────────────────────────────────────────────────────┤
+│                   KERNEL / DRIVERS                      │
+│  ALSA (I2S: INMP441 + MAX98357A)    fbtft / ILI9341    libgpiod        │
+└─────────────────────────────────────────────────────────┘
 ```
+See [architecture.md](architecture.md) for full interface definitions, class diagrams, thread model, and design patterns.
 
 ### Gợi ý / Recommendations
 - **Event Bus / IPC:** `POSIX message queue`. Low latency (~0.5ms)
@@ -138,78 +97,156 @@ ASCII (compact):
 - **Docs:** Add sequence diagrams for main flows (PTT → STT → AI → TTS → Playback) in `docs/architecture.md`.
 - **Versioning:** Add HAL semantic versioning to support gradual driver/impl upgrades.
 
-### Tại sao chọn Layered Architecture?
-| Tiêu chí | Đánh giá |
-|----------|----------|
-| **Separation of Concerns** | Mỗi layer có trách nhiệm rõ ràng |
-| **Testability** | Mock HAL để test application không cần hardware |
-| **Portability** | Đổi hardware chỉ cần implement HAL |
-| **Maintainability** | Dễ debug, dễ understand |
-| **Phù hợp embedded** | Minimal |
+### Why Layered Architecture?
 
-## Technical Decisions
-| Component | Choice | Key reason | Alternative (Future) |
-|-----------|--------|------------|----------------------|
-| Architecture | Layered + HAL | Maintainability, testability | Microservices (scale) |
-| IPC / Event Bus | POSIX message queue | Low latency, simplicity | Unix socket, D-Bus |
-| Audio | ALSA (libasound) + I2C codec IC | Embedded standard, flexible | PulseAudio/Pipewire |
-| Audio Codec | I2C-based IC (WM8960 or similar) | I2C control + I2S data | Direct I2S (no codec IC) |
-| LCD Driver | Custom SPI + DMA (ILI9341) | Learning value, full control | Pre-built fbdev (faster) |
-| Network | USB to PC (LM Studio) | Direct, no network stack | Ethernet (future) |
-| TTS | eSpeak-ng | Offline, lightweight | Cloud TTS (quality) |
-| AI/LLM | LM Studio (OpenAI-compat) | Local, easy, privacy | Ollama/vLLM/Cloud |
-| GUI | LVGL | Lightweight, production-grade | Raw Framebuffer |
-| Serialization | JSON | Human-readable, easy debug | Protobuf (performance) |
-| Logging | spdlog | Fast, modern C++ | syslog (system) |
-| GPIO | libgpiod | Modern, maintained | sysfs (legacy) |
+| Criteria | Rationale |
+|----------|-----------|
+| **Separation of Concerns** | Each layer has one clear responsibility |
+| **Testability** | Mock HAL enables unit tests without real hardware |
+| **Portability** | Swapping hardware = only HAL changes |
+| **Maintainability** | Easy to debug, easy to understand for newcomers |
+| **Embedded fit** | Minimal overhead, no unnecessary framework |
+
+
+## 🔩 Hardware
+
+See [hardware_setup.md](hardware_setup.md) for full wiring diagrams, pin mapping, device tree overlay, and Buildroot kernel config.
+
+---
+
+## 🗂️ Project Structure
+
+```
+bbb-voice-assistant/
+├── CMakeLists.txt                    # Top-level CMake
+├── README.md
+├── docs/                             # All documentation
+│   ├── PLAN.md
+│   ├── architecture.md
+│   ├── hardware_setup.md
+│   ├── build_system.md
+│   ├── timeline.md
+│   ├── troubleshooting.md
+│   └── development/
+│       ├── coding_guide.md
+│       ├── device_driver.md
+│       ├── hal_layer.md
+│       └── app_layer.md
+│
+├── hal/                              # HAL Layer — compiled as shared libs
+│   ├── include/
+│   │   ├── IAudioHAL.hpp
+│   │   ├── IDisplayHAL.hpp
+│   │   └── IGPIOHAL.hpp
+│   ├── audio/
+│   │   ├── AlsaHAL.cpp
+│   │   ├── AlsaHAL.hpp
+│   │   └── CMakeLists.txt
+│   ├── display/
+│   │   ├── FbdevHAL.cpp
+│   │   ├── FbdevHAL.hpp
+│   │   └── CMakeLists.txt
+│   └── gpio/
+│       ├── GpiodHAL.cpp
+│       ├── GpiodHAL.hpp
+│       └── CMakeLists.txt
+│
+├── middleware/                       # Middleware Layer
+│   ├── audio_pipeline/
+│   │   ├── AudioPipeline.cpp
+│   │   ├── AudioPipeline.hpp
+│   │   └── CMakeLists.txt
+│   ├── ai_client/
+│   │   ├── AIClient.cpp
+│   │   ├── AIClient.hpp
+│   │   └── CMakeLists.txt
+│   └── tts/
+│       ├── TTSEngine.cpp
+│       ├── TTSEngine.hpp
+│       └── CMakeLists.txt
+│
+├── app/                              # Application Layer
+│   ├── main.cpp
+│   ├── VoiceAssistant.cpp
+│   ├── VoiceAssistant.hpp
+│   ├── DisplayController.cpp
+│   ├── DisplayController.hpp
+│   ├── ButtonController.cpp
+│   ├── ButtonController.hpp
+│   ├── EventBus.hpp
+│   └── CMakeLists.txt
+│
+├── common/                           # Shared utilities
+│   ├── Logger.hpp                    # spdlog wrapper
+│   ├── Config.hpp                    # JSON config loader (nlohmann/json)
+│   ├── Types.hpp                     # Shared enums, structs, constants
+│   └── CMakeLists.txt
+│
+├── config/
+│   └── config.json                   # Runtime configuration
+│
+├── scripts/
+│   ├── setup_wsl.sh                  # WSL2 + Buildroot prerequisites
+│   ├── build.sh                      # Full build (Buildroot + app)
+│   └── deploy.sh                     # SCP binary to BBB
+│
+├── tests/
+│   ├── CMakeLists.txt
+│   ├── hal/                          # HAL unit tests (mock HAL)
+│   ├── middleware/                   # Middleware tests
+│   └── app/                          # State machine + logic tests
+│
+├── buildroot/
+│   ├── configs/
+│   │   └── bbb_voiceassistant_defconfig
+│   └── board/bbb/
+│       ├── rootfs_overlay/
+│       │   └── etc/systemd/system/
+│       │       └── voiceassistant.service
+│       └── post_build.sh
+│
+└── kernel/
+    └── dts/
+        └── bbb-voiceassistant-overlay.dts
+```
+
+---
 
 ## State Machine
 
-```mermaid
-stateDiagram-v2
-    [*] --> INIT
-    INIT --> IDLE: hw init complete
-
-    IDLE --> LISTENING: button press (PTT)
-    IDLE --> ERROR
-
-    LISTENING --> PROCESSING: release button / VAD stop
-    LISTENING --> IDLE: timeout
-    LISTENING --> ERROR
-
-    PROCESSING --> SPEAKING: AI response received
-    PROCESSING --> IDLE: no response / cancel
-    PROCESSING --> ERROR: processing error
-
-    SPEAKING --> IDLE: TTS complete / button press (interrupt)
-
-    ERROR --> IDLE: recover (app restart)
-
-    note left of LISTENING
-      - Record audio while PTT held or VAD active
-      - Timeout returns to IDLE
-    end note
-
-    note left of PROCESSING
-      - Send audio → STT → AI → generate reply
-    end note
 ```
+               ┌──────┐
+  power on ──► │ INIT │
+               └──────┘
+                  │ hw init complete
+                  ▼
+               ┌──────┐
+          ┌──► │ IDLE │ ◄─────────────────────────────┐
+          │    └──────┘                               │
+          │       │ PTT press                         │
+          │       ▼                                   │
+          │    ┌───────────┐                          │
+          │    │ LISTENING │──── timeout ─────────────┤
+          │    └───────────┘                          │
+          │       │ PTT release / VAD stop            │
+          │       ▼                                   │
+          │    ┌────────────┐                         │
+          │    │ PROCESSING │──── error ──────────────┤
+          │    └────────────┘                         │
+          │       │ AI response received              │
+          │       ▼                                   │
+          │    ┌──────────┐                           │
+          │    │ SPEAKING │──── TTS complete ─────────┘
+          │    └──────────┘
+          │       │ PTT press (interrupt)
+          │       ▼
+          │    ┌────────┐
+          └─── │ CANCEL │
+               └────────┘
 
-```text
-ASCII (compact):
- [*] -> INIT
- INIT -> IDLE  (hw init complete)
- IDLE -> LISTENING  (button press / PTT)
- IDLE -> ERROR
- LISTENING -> PROCESSING  (release / VAD stop)
- LISTENING -> IDLE  (timeout)
- LISTENING -> ERROR
- PROCESSING -> SPEAKING  (AI response received)
- PROCESSING -> IDLE  (no response / cancel)
- PROCESSING -> ERROR
- SPEAKING -> IDLE  (TTS complete / interrupt)
- SPEAKING -> ERROR
- ERROR -> IDLE  (restart app)
+  Any state ── critical error ──► ┌───────┐
+                                  │ ERROR │──► IDLE (auto-recovery)
+                                  └───────┘
 ```
 ### Valid State transitions
 | From | To (allowed) |
@@ -221,60 +258,60 @@ ASCII (compact):
 | SPEAKING | IDLE (TTS complete / interrupt), ERROR |
 | ERROR | IDLE (restart app) |
 
-## Hardware
+---
 
-### Beaglebone Black Pin Mapping
-- **Power:** 5V/GND via barrel jack or microUSB
-- **I2S Audio:** I2S0 pins (P9: 31, 29, 30, 32) → I2C audio codec IC (WM8960, ALC5623, etc.)
-  - I2C control: I2C0 (P9: 17/18)
-  - Analog output: codec IC → amp → speaker
-  - Analog input: mic → preamp → codec IC
-- **SPI LCD:** SPI0 pins (P9: 17, 18, 21, 22) → ILI9341 (custom driver)
-  - SPI mode: 0, clock: 10-20 MHz, DMA recommended
-- **GPIO (buttons, LEDs):** GPIO0 or GPIO1 (libgpiod)
-  - PTT button, volume +/-, status LED
-- **USB to PC:** microUSB connector (power + data) or separate USB cable
-  - Connection: BBB ↔ PC (LM Studio runs on PC)
-  - Protocol: HTTP over USB Ethernet adapter (if needed) or direct socket
+## ⚖️ Technical Decisions
 
-### Connectivity
-- **Primary:** USB to PC (LM Studio)
-  - No Ethernet needed for MVP
-- **Fallback:** Optional Ethernet for future scaling
+| Component | Choice | Key Reason | Future Alternative |
+|-----------|--------|------------|--------------------|
+| Build System | **Buildroot** | Simpler than Yocto, faster iteration | Yocto (production scale) |
+| Audio | **ALSA (libasound)** | Embedded standard, direct HW access | PulseAudio / Pipewire |
+| TTS | **eSpeak-ng** | Offline, lightweight, no server needed | Kokoro / Cloud TTS |
+| AI / LLM | **LM Studio** | Local, easy setup, OpenAI-compatible | Ollama / vLLM |
+| GUI | **LVGL** | Lightweight, fbdev backend, production-proven | Qt Embedded |
+| Display Driver | **fbtft (ILI9341)** | Kernel-integrated, `/dev/fb1` for LVGL | Custom spidev userspace driver |
+| JSON | **nlohmann/json** | Header-only, modern C++, readable | Protobuf (performance) |
+| Logging | **spdlog** | Fast, async, modern C++ | syslog |
+| GPIO | **libgpiod** | Modern chardev API, actively maintained | sysfs (legacy, deprecated) |
+| HTTP | **libcurl** | Robust, well-tested for REST calls | cpp-httplib (header-only) |
 
-→ cần tạo hardware_setup.md với chi tiết wiring diagram
+---
 
-## Project Structure (not done)
-Khuyến nghị cần có các mục quan trọng: kernel, hal, middleware, app, config (json), scripts, tests, common,...
+## 📅 Timeline Overview
 
-## Timeline Overview
-| Tuần | Phase | Deliverables |
-|------|-------|--------------|
-| **1** | Foundation | BBB boot, image build, device tree, hardware setup, drivers |
-| **2** | HAL Layer | Audio/Display/GPIO HAL, shared libs, Cmake |
-| **3** | Middleware + App | Audio pipeline, AI client, TTS, state machine, LVGL UI |
-| **4** | Integration | Full pipeline, error handling, systemd service, docs |
--> cần tạo chi tiết timeline.md và link nó ở đây.
+| Week | Phase | Deliverables |
+|------|-------|-------------|
+| **1** | Foundation | Buildroot image, BBB boot from SD, SSH, SPI/GPIO device tree, audio verify |
+| **2** | HAL Layer | AudioHAL, DisplayHAL, GPIOHAL, shared libs, CMake structure, mock-based tests |
+| **3** | Middleware + App | Audio pipeline, AI client, TTS engine, state machine, LVGL UI |
+| **4** | Integration | Full end-to-end pipeline, error handling, systemd service, final documentation |
 
-## Documentation Index (tham khảo)
-| Tài liệu | Nội dung | Status |
-|----------|----------|--------|
-| PLAN.md | Tổng quan, yêu cầu kỹ thuật, phương án, phân tích | ✅ Draft |
-| architecture.md | Interface definitions, class diagrams, design patterns | ⏳ Pending |
-| hardware_setup.md | BBB pinout, wiring diagrams, device tree overlays | ⏳ Pending |
-| build_system.md | **Buildroot setup, cross-compilation, kernel/DTB, image deploy** | **✅ Draft** |
-| timeline.md | Weekly breakdown with daily tasks, milestones | ⏳ Pending |
-| troubleshooting.md | Common build/runtime issues and solutions | ⏳ Pending |
-| development/coding_guide.md | C++ techniques, error handling, logging patterns | ⏳ Pending |
-| development/device_driver.md | SPI LCD (ILI9341) driver, registers, DMA setup | ⏳ Pending |
-| development/hal_layer.md | IAudioHAL, IDisplayHAL, IGPIOHAL design, mocks | ⏳ Pending |
-| development/app_layer.md | VoiceAssistant state machine, event bus, LVGL UI | ⏳ Pending |
+→ See [timeline.md](timeline.md) for detailed daily breakdown.
+
+---
+
+## 📚 Documentation Index
+
+| Document | Content |
+|----------|---------|
+| [PLAN.md](PLAN.md) | Overview, requirements, architecture, decisions (this file) |
+| [architecture.md](architecture.md) | Interface definitions, class diagrams, thread model, patterns |
+| [hardware_setup.md](hardware_setup.md) | BBB pinout, wiring, device tree, Buildroot kernel config |
+| [build_system.md](build_system.md) | Buildroot config, CMake cross-compile, WSL2 setup, deploy |
+| [timeline.md](timeline.md) | 4-week plan with daily tasks |
+| [troubleshooting.md](troubleshooting.md) | Common issues and solutions |
+| [development/coding_guide.md](development/coding_guide.md) | C++17 patterns, error handling, logging, project conventions |
+| [development/device_driver.md](development/device_driver.md) | ILI9341 driver, fbtft, SPI device tree configuration |
+| [development/hal_layer.md](development/hal_layer.md) | HAL interface design, shared library, mock pattern |
+| [development/app_layer.md](development/app_layer.md) | State machine, EventBus, LVGL UI, ButtonController |
+
+---
 
 ## Key decisions log
 | # | Decision | Options | Chosen | Rationale |
 |---|----------|---------|--------|-----------|
 | 1 | GUI Framework + Backend | Raw FB/LVGL/Qt | **LVGL + custom SPI driver** | Lightweight, production-grade, direct control of LCD |
-| 2 | Audio API + Codec | ALSA/PulseAudio (± codec IC) | **ALSA + I2C codec IC** | Direct control, I2C mixer, integrated solution |
+| 2 | Audio API + Codec | ALSA/PulseAudio (± codec IC) | **ALSA + native I2S hardware** | Direct control, low-latency path with INMP441 and MAX98357A |
 | 3 | Voice Trigger | Wake word/Push-to-talk (PTT) | **Push-to-talk (PTT)** | Simpler, reliable, practical |
 | 4 | AI Backend + Network | Cloud/Local + Eth/USB | **Local (LM Studio) via USB** | Privacy, direct connection to PC |
 | 5 | TTS | eSpeak-ng/Flite/Remote | **eSpeak-ng** | Offline, lightweight, good enough |
@@ -284,10 +321,10 @@ Khuyến nghị cần có các mục quan trọng: kernel, hal, middleware, app,
 | 9 | LCD Driver | Pre-built fbdev/Custom SPI | **Custom SPI + DMA** | Learning value, full control over ILI9341 |
 | 10 | Audio Codec IC | No codec/I2C codec | **I2C-based codec IC** | Flexible, integrated solution, easier control |
 
-## Out of Scope (Future considerations)
-- DRM/KMS display driver (fbdev sufficient for now)
-- Wake word detection (push-to-talk only)
-- Multi-language TTS (English only initially)
+## 🚫 Out of Scope (Future Considerations)
+- DRM/KMS display driver (fbdev sufficient)
+- Wake word / hotword detection (PTT only for now)
+- Vietnamese or multi-language support (English only)
 - Cloud AI integration (local only)
-- Plugin Architecture (monolithic app)
-- Ethernet integration (USB sufficient for MVP)
+- Plugin / module architecture (monolithic app for now)
+- OTA firmware updates

@@ -1,0 +1,40 @@
+/* Pin Muxing */
+&am33xx_pinmux {
+    /* SPI0 pins for LCD */
+    spi0_pins: pinmux_spi0 {
+        pinctrl-single,pins = <
+            AM33XX_PADCONF(AM335X_PIN_SPI0_SCLK, PIN_INPUT_PULLUP, MUX_MODE0)
+			AM33XX_PADCONF(AM335X_PIN_SPI0_D0,   PIN_INPUT_PULLUP, MUX_MODE0)
+			AM33XX_PADCONF(AM335X_PIN_SPI0_D1,   PIN_OUTPUT,       MUX_MODE0)
+			AM33XX_PADCONF(AM335X_PIN_SPI0_CS0,  PIN_OUTPUT,       MUX_MODE0)
+        >;
+    };
+
+    /* GPIO buttons */
+
+    /* GPIO LED */
+};
+
+
+/* LCD (ili9341) configuration */
+&spi0 {
+    status = "okay";
+    pinctrl-names = "default;
+    pinctrl-0 = <&spi0_pins>
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    ili9341: display@0 {
+        compatible = "ilitek,ili9341";
+        reg = <0>;
+        spi-max-frequency = <32000000>;
+
+        dc-gpios    = <&gpio1 12 GPIO_ACTIVE_LOW>;  /* P8_12: gpio1_12 */
+        reset-gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;  /* P8_14: gpio1_14 */
+        led-gpios   = <&gpio1 18 GPIO_ACTIVE_HIGH>; /* P8_18: gpio1_18 */
+
+        rotate = <0>;
+        bgr;
+        buswidth = <8>;
+    };
+};

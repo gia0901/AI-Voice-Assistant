@@ -7,5 +7,6 @@
 ### Bring-up
 - [ ] USB-To-Ethernet và SSH hoạt động được
 - [ ] Config Audio setting
-- [ ] Config SPI0
- 
+- [x] Config SPI0
+    - [ ] Bring-up FBTFT + ILI9341 (Kernel 6.12)
+    - [ ] Bring-up GPIOs

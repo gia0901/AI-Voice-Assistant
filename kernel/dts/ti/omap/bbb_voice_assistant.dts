@@ -1,0 +1,149 @@
+/dts-v1/;
+
+#include "am335x-boneblack.dts"
+
+/ {
+    model = "TI AM335x BeagleBone Black";
+    compatible = "ti,am335x-bone-black", "ti,am335x-bone", "ti,am33xx";
+
+    /* Configure a Sound Card */
+
+#if 0
+    /*
+     * MAX98357A không có control bus.
+     * Ta dùng dummy codec để tạo DAI endpoint.
+     */
+    max98357a_codec: max98357a-codec {
+        compatible = "linux,snd-soc-dummy";
+    };
+#endif
+
+#if 0
+    sound {
+        compatible = "simple-audio-card";
+
+        simple-audio-card,name = "BBB-Voice-Test";
+
+        simple-audio-card,format = "i2s";
+
+        /*
+         * BBB phát clock
+         */
+        simple-audio-card,bitclock-master =
+            <&sound_master>;
+
+        simple-audio-card,frame-master =
+            <&sound_master>;
+
+        sound_master: simple-audio-card,cpu {
+            sound-dai = <&mcasp0>;
+        };
+
+        simple-audio-card,codec {
+            sound-dai = <&max98357a_codec>;
+        };
+    };
+#endif
+};
+
+
+&am33xx_pinmux {
+    spi0_pins: pinmux_spi0 {
+        pinctrl-single,pins = <
+            AM33XX_PADCONF(AM335X_PIN_SPI0_SCLK, PIN_INPUT_PULLUP, MUX_MODE0)
+			AM33XX_PADCONF(AM335X_PIN_SPI0_D0,   PIN_INPUT_PULLUP, MUX_MODE0)
+			AM33XX_PADCONF(AM335X_PIN_SPI0_D1,   PIN_OUTPUT,       MUX_MODE0)
+			AM33XX_PADCONF(AM335X_PIN_SPI0_CS0,  PIN_OUTPUT,       MUX_MODE0)
+        >;
+    };
+
+    /* The AudioCape also reserves I2C pins because 
+        they want to use the onboard AIC31 codec, which 
+        is controlled by I2C.
+        Not all DT overlays will do this. */
+    pinmux_i2c2_pins {
+        pinctrl-single,pins = <
+            0x150 0x72 	/*spi0_scl.i2c2_sda,SLEWCTRL_SLOW | INPUT_PULLUP |MODE2*/
+            0x154 0x72	/*spi0_d0.i2c2_scl,SLEWCTRL_SLOW | INPUT_PULLUP | MODE2*/
+        >;
+    };
+
+#if 0
+    /* This is where the McASP pins are muxed. Expect 
+        to see many variations on this for various capes 
+        with different needs. */
+    bbb_voice_audio_pins: bbb_voice_audio_pins {
+        pinctrl-single,pins = <
+            0x1ac 0x00      /* mcasp0_ahclkx,       P9_25 | MODE0 | OUTPUT_PULLDOWN (high frequency bit clock) */
+            0x19c 0x22      /* mcasp0_axr2,         P9_28 | MODE2 | INPUT_PULLDOWN (audio input) */  
+            0x194 0x20      /* mcasp0_fsx,          P9_29 | MODE0 | INPUT_PULLDOWN (left right sync clock) */
+            0x190 0x20      /* mcasp0_ahclk,        P9_31 | MODE0 | INPUT_PULLDOWN (bit clock) */
+            0x198 0x20      /* mcasp0_axr0,         P9_30 | MODE0 | OUTPUT_PULLDOWN (audio output) */
+        >;
+    };
+#endif
+
+    /* GPIO buttons */
+
+    /* GPIO LED */
+};
+
+/* LCD (ili9341) configuration */
+&spi0 {
+    status = "okay";
+    pinctrl-names = "default";
+    pinctrl-0 = <&spi0_pins>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    ili9341: display@0 {
+        compatible = "ilitek,ili9341";
+        reg = <0>;
+        spi-max-frequency = <32000000>;
+
+        dc-gpios    = <&gpio1 12 GPIO_ACTIVE_LOW>;  /* P8_12: gpio1_12 */
+        reset-gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;  /* P8_14: gpio1_14 */
+        led-gpios   = <&gpio1 18 GPIO_ACTIVE_HIGH>; /* P8_18: gpio1_18 */
+
+        rotate = <0>;
+        bgr;
+        buswidth = <8>;
+    };
+};
+
+#if 0
+/* Enable Audio Codec */
+&i2c2 {
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    tlv320aic3x: tlv320aic3x@1b {
+        compatible = "ti,tlv320aic3x";
+        reg = <0x1b>;
+        status = "okay";
+    };
+};
+#endif
+
+#if 0
+/* Enable McASP */
+&mcasp0 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&bbb_voice_audio_pins >;
+
+    status = "okay";
+
+    op-mode = <0>;          /* MCASP_IIS_MODE */
+    tdm-slots = <2>;
+    num-serializer = <16>;
+    serial-dir = <  /* 0: INACTIVE, 1: TX, 2: RX */
+        1 0 2 0
+        0 0 0 0
+        0 0 0 0
+        0 0 0 0
+    >;
+    tx-num-evt = <1>;
+    rx-num-evt = <1>;
+};
+#endif
+

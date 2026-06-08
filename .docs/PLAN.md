@@ -13,7 +13,7 @@ Build a complete embedded Linux device on BeagleBone Black with:
 - **Visual Feedback:** Status and responses on ILI9341 TFT LCD 320×240 (LVGL UI).
 - **Audio Output:** Text-to-speech via eSpeak-ng, playback via native I2S hardware (INMP441 microphone + MAX98357A DAC/amp). USB audio is a fallback for prototyping.
 - **Physical Controls:** PTT + Volume Up/Down buttons, 1 status LED.
-
+- **Driver Development:** Self-made ILI9341 Driver, re-use Audio drivers of Linux kernel.
 ---
 
 ## 💎 Value

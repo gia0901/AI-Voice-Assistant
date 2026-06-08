@@ -23,19 +23,18 @@ Dự án sử dụng native I2S audio để giữ đường truyền âm thanh n
 
 ## Component list
 
-| Component | Part / Notes | Qty |
-|-----------|-------------|-----|
-| BeagleBone Black | Rev C hoặc tương đương | 1 |
-| I2S Microphone | INMP441 digital microphone | 1 |
-| I2S DAC/Amp | MAX98357A class-D amplifier | 1 |
-| Speaker | 8Ω speaker phù hợp với MAX98357A | 1 |
-| TFT LCD Display | ILI9341, 320×240, SPI, 3.3V | 1 |
-| Tactile Buttons | 6×6mm push button | 3 |
-| Pull-up Resistors | 10 kΩ | 3 |
-| LED | 3mm/5mm LED | 1 |
-| LED Resistor | 330 Ω | 1 |
-| SD Card | 16 GB Class 10 microSD | 1 |
-| Breadboard + Wires | Dupont jumper | — |
+| Component       | Model                   |
+| --------------- | ----------------------- |
+| SBC             | BeagleBone Black Rev C  |
+| Display         | ILI9341 SPI TFT 240x320 |
+| Microphone      | INMP441                 |
+| Audio Amplifier | MAX98357A               |
+| Speaker         | 8Ω Speaker              |
+| Buttons         | 3 Push Buttons          |
+| LED             | Status LED              |
+| Storage         | microSD 16GB+           |
+| Debug UART      | CP2102 USB-UART         |
+
 
 ---
 
@@ -148,8 +147,8 @@ Sử dụng overlay này để bật SPI0, cấu hình pin GPIO cho màn hình v
 		reg = <0>;
 		spi-max-frequency = <32000000>;
 
-		dc-gpios    = <&gpio1 16 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio1 28 GPIO_ACTIVE_LOW>;
+		dc-gpios    = <&gpio1 12 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;
 		led-gpios   = <&gpio1 18 GPIO_ACTIVE_HIGH>;
 
 		rotate = <0>;
@@ -251,3 +250,304 @@ CONFIG_GPIO_CDEV=y
 ```
 
 > Không cần cấu hình USB audio cho phần âm thanh. Dự án chỉ dùng audio qua McASP/I2S.
+
+
+# BBB Voice Assistant - Hardware Setup
+
+> Hardware specification cho dự án Voice Assistant trên BeagleBone Black sử dụng Buildroot và Linux 6.12.
+
+---
+
+# 1. Project Goal
+
+Voice Assistant Embedded Linux:
+* BeagleBone Black Rev C
+* Buildroot
+* Linux Kernel 6.12
+* TFT LCD SPI ILI9341
+* I2S Audio Playback
+* I2S Audio Capture
+* Ethernet Networking
+* GPIO Buttons
+* Status LED
+
+Mục tiêu:
+
+* Tập trung vào Voice Assistant
+* Hiểu kiến trúc Embedded Linux
+* Tự phát triển ILI9341 Driver
+* Sử dụng driver audio có sẵn trong Linux Kernel
+* Không sử dụng GUI Framework (Qt, GTK, Wayland)
+
+---
+
+# 4. Development Phases
+
+## Phase 0
+
+Buildroot Bring-up
+
+Features:
+
+* Buildroot
+* Ethernet
+* SSH
+* UART Debug
+
+---
+
+## Phase 1
+
+GPIO
+
+Features:
+
+* PTT Button
+* Volume Up
+* Volume Down
+* Status LED
+
+---
+
+## Phase 2
+
+ILI9341 Driver
+
+Features:
+
+* SPI Driver
+* Framebuffer
+* LCD Rendering
+
+---
+
+## Phase 3
+
+Audio Playback
+
+Features:
+
+* McASP0
+* MAX98357A
+* ALSA Playback
+
+---
+
+## Phase 4
+
+Audio Capture
+
+Features:
+
+* INMP441
+* ALSA Capture
+
+---
+
+## Phase 5
+
+Voice Assistant
+
+Features:
+
+* Recording
+* Playback
+* Local Networking
+* Voice Processing
+
+---
+
+# 5. Pin Assignment
+
+## SPI0 - ILI9341
+
+| Function      | BBB Pin |
+| ------------- | ------- |
+| SPI0_CS0      | P9_17   |
+| SPI0_MOSI     | P9_18   |
+| SPI0_MISO     | P9_21   |
+| SPI0_SCLK     | P9_22   |
+| LCD_RESET     | P9_12   |
+| LCD_DC        | P9_15   |
+| LCD_BACKLIGHT | P9_14   |
+
+---
+
+## Audio - McASP0
+
+BBB là I2S Master.
+
+INMP441 và MAX98357A hoạt động ở chế độ Slave.
+
+| Function          | BBB Pin |
+| ----------------- | ------- |
+| BCLK              | P9_29   |
+| LRCLK             | P9_28   |
+| TX (to MAX98357A) | P9_31   |
+| RX (from INMP441) | P9_30   |
+
+---
+
+## GPIO
+
+| Function    | BBB Pin |
+| ----------- | ------- |
+| PTT Button  | P8_11   |
+| Volume Up   | P8_12   |
+| Volume Down | P8_14   |
+| Status LED  | P8_13   |
+
+---
+
+## UART Debug
+
+| Function | BBB Pin |
+| -------- | ------- |
+| UART0_RX | P9_26   |
+| UART0_TX | P9_24   |
+
+---
+
+# 6. Audio Wiring
+
+## MAX98357A
+
+| MAX98357A | BBB   |
+| --------- | ----- |
+| BCLK      | P9_29 |
+| LRC       | P9_28 |
+| DIN       | P9_31 |
+| VIN       | 3.3V  |
+| GND       | GND   |
+
+---
+
+## INMP441
+
+| INMP441 | BBB   |
+| ------- | ----- |
+| SCK     | P9_29 |
+| WS      | P9_28 |
+| SD      | P9_30 |
+| VDD     | 3.3V  |
+| GND     | GND   |
+
+---
+
+# 7. Buildroot Requirements
+
+RootFS tối thiểu:
+
+* Busybox
+* Dropbear
+* ALSA
+* libgpiod
+
+Không sử dụng:
+
+* X11
+* Wayland
+* Qt
+* GTK
+
+---
+
+# 8. Device Tree Design Rules
+
+## SPI
+
+Yêu cầu:
+
+* Enable SPI0
+* Enable ILI9341
+* Configure LCD GPIO pins
+
+---
+
+## GPIO
+
+Yêu cầu:
+
+* Configure buttons
+* Configure status LED
+
+---
+
+## Audio
+
+Yêu cầu:
+
+* Enable McASP0
+* BBB làm clock master
+* Enable ALSA ASoC
+
+---
+
+# 9. Device Tree Implementation Status
+
+## Confirmed
+
+* SPI0
+* GPIO
+* UART0
+
+---
+
+## To Be Verified During Bring-up
+
+* McASP0 pinmux
+* McASP0 serializer mapping
+* ASoC topology
+* INMP441 capture path
+* MAX98357A playback path
+
+Lý do:
+
+Các mục trên phụ thuộc:
+
+* Linux 6.12
+* Device Tree bindings
+* Driver availability
+* ASoC routing
+
+và cần được xác minh trên phần cứng thật trong giai đoạn Audio Bring-up.
+
+---
+
+# 10. Driver Strategy
+
+## Custom Driver
+
+Tự phát triển:
+
+* ILI9341 SPI Driver
+* Framebuffer Interface
+
+---
+
+## Kernel Driver
+
+Sử dụng driver sẵn có:
+
+* McASP
+* ALSA
+* ASoC
+* MAX98357A
+* INMP441 (nếu có binding phù hợp)
+
+---
+
+# 11. Success Criteria
+
+Hệ thống được xem là hoàn thành khi:
+
+* Buildroot boot ổn định
+* Ethernet hoạt động
+* GPIO hoạt động
+* ILI9341 hiển thị được framebuffer
+* Audio playback hoạt động
+* Audio capture hoạt động
+* Voice Assistant hoạt động ổn định trên mạng nội bộ
+
+```
+```

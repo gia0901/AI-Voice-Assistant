@@ -1,0 +1,53 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "ti,am335x-bone-black", "ti,am33xx", "ti,beaglebone-black";
+
+    /* Fragment 0: mux the physical pins */
+    fragment@0 {
+        target = <&am33xx_pinmux>;
+        __overlay__ {
+            bb_ili9341_spi0_pins: pinmux_bb_ili9341_spi0_pins {
+                pinctrl-single,pins = <
+                    0x150 0x10   /* P9_22 spi0_sclk,        OUTPUT_PULLUP | MODE0 */
+                    0x154 0x10   /* P9_21 spi0_d0 (MOSI),   OUTPUT_PULLUP  | MODE0 */
+                    0x158 0x30   /* P9_18 spi0_d1 (MISO),   INPUT_PULLUP | MODE0 */
+                    0x15c 0x10   /* P9_17 spi0_cs0,         OUTPUT_PULLUP | MODE0 */
+                >;
+            };
+
+            bb_ili9341_ctrl_pins: pinmux_bb_ili9341_ctrl_pins {
+                pinctrl-single,pins = <
+                    0x040 0x0f   /* P9_15 gpmc_a0.gpio1_16 (RESET), OUTPUT | PULLDIS | MODE7 */
+                    0x044 0x0f   /* P9_23 gpmc_a1.gpio1_17 (DC),    OUTPUT | PULLDIS | MODE7 */
+                >;
+            };
+        };
+    };
+
+    /* Fragment 1: enable spi0 and attach the panel driver */
+    fragment@1 {
+        target = <&spi0>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            ti,pindir-d0-out-d1-in = <1>;
+            status = "okay";
+            pinctrl-names = "default";
+            pinctrl-0 = <&bb_ili9341_spi0_pins>;
+
+            ili9341_lcd: display@0 {
+                compatible = "ilitek,ili9341", "adafruit,yx240qv29","multi-inno,mi0283qt";
+                reg = <0>;
+                buswidth = <8>;
+                pinctrl-names = "default";
+                pinctrl-0 = <&bb_ili9341_ctrl_pins>;
+                spi-max-frequency = <32000000>;
+                rotate = <0>;
+                dc-gpios    = <&gpio1 17 0>;   /* active-high select line */
+                reset-gpios = <&gpio1 16 1>;   /* active-low reset */
+            };
+        };
+    };
+};

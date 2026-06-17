@@ -1,2 +1,6 @@
 build/
 buildroot/
+.kernel_mainline/
+.yocto/
+.toolchain/
+extlinux/

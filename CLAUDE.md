@@ -13,7 +13,7 @@ Build a complete embedded Linux device on BeagleBone Black with:
 - **Visual Feedback:** Status and responses on ILI9341 TFT LCD 320×240 (LVGL UI).
 - **Audio Output:** Text-to-speech via eSpeak-ng, record and playback via USB audio.
 - **Physical Controls:** PTT + Volume Up/Down buttons, 1 status LED.
-- **Driver Development:** Framebuffer ILI9341 driver. (TinyDRM in the future if needed)
+- **Driver Development:** Use Legacy fbtft ILI9341 driver - already tested. (TinyDRM in the future if needed)
 ---
 
 ## 💎 Value
@@ -59,7 +59,7 @@ Build a complete embedded Linux device on BeagleBone Black with:
 | **Hardware** | BeagleBone Black Rev C (512 MB RAM, 4 GB eMMC, 16 GB SD card) |
 | **OS** | Linux (kernel 5.10.x), official distro: https://www.beagleboard.org/distros/beaglebone-black-debian-12-14-2026-05-19-iot-v5-10-ti |
 | **System Configuration** | Device Tree overlay, modify via `/boot/uEnv.txt` |
-| **Network** | Ethernet (RJ45) on the same LAN/switch as the PC running LM Studio + Whisper server. (v1 had a contradiction here — decision log said "via USB"; resolved in favor of Ethernet for simplicity of static IPs and because BBB also needs general internet access for `apt`.) |
+| **Network** | Ethernet (RJ45) on the same LAN/switch as the PC running LM Studio + Whisper server. (favor of Ethernet for simplicity of static IPs and because BBB also needs general internet access for `apt`.) |
 | **AI Server** | LM Studio on a separate PC (OpenAI-compatible chat completions API) |
 | **STT Server** | A local Whisper server (`whisper.cpp` server or `faster-whisper-server`) on the same PC, separate process/port from LM Studio |
 | **Display** | ILI9341 SPI TFT LCD, 320×240, RGB565 |
@@ -69,10 +69,10 @@ Build a complete embedded Linux device on BeagleBone Black with:
 
 ---
 
-## 🏗️ Architecture (Not decide)
+## 🏗️ Architecture 
 
+## 🗂️ Project Structure
 
-## 🗂️ Project Structure (Not decide, below is for reference)
 ### 4.1 Layers
 
 ```
@@ -93,9 +93,9 @@ Build a complete embedded Linux device on BeagleBone Black with:
 
 `SttClient` and `LlmClient` are two separate middleware components (each a thin HTTP client) rather than one "AiClient" — they talk to two different servers on the PC with two different APIs. This is the direct fix for the LM-Studio-doesn't-do-STT gap.
 
-### 4.2 Threading model (resolves the v1 "IPC / Event Bus — Not decide" row)
+### 4.2 Threading model
 
-A single process, multiple threads, one in-process thread-safe queue (`EventBus`). No OS-level IPC (sockets/message queues) is needed since everything runs in one binary — the "IPC" framing in v1 was really about whether the event bus is callback-based or queue-based. **Decision: queue-based.** Callback chaining across threads (GPIO interrupt thread calling directly into LVGL, for instance) is a race-condition trap; a queue with a single consumer avoids that entirely.
+A single process, multiple threads, one in-process thread-safe queue (`EventBus`). No OS-level IPC (sockets/message queues) is needed since everything runs in one binary — whether the event bus is callback-based or queue-based. **Decision: queue-based.** Callback chaining across threads (GPIO interrupt thread calling directly into LVGL, for instance) is a race-condition trap; a queue with a single consumer avoids that entirely.
 
 | Thread | Owns | Behavior |
 |--------|------|----------|
@@ -295,7 +295,7 @@ This budget confirms NFR-2 is realistic without needing to do anything unusual �
 
 ---
 
-## 11. Build & Deployment Strategy *(new — not in v1)*
+## 11. Build & Deployment Strategy
 
 Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow and not recommended for iterative development.
 
@@ -306,7 +306,7 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 5. **systemd service**, not a manual run script, for the final deliverable — gives you auto-restart on crash and clean boot integration, and is what NFR-3 (boot time) implicitly assumes.
 ---
 
-## 12. ⚠️ Risk Register *(new — not in v1)*
+## 12. ⚠️ Risk Register
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
@@ -365,13 +365,13 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 | 1 | GUI Framework + Backend | Raw FB/LVGL/Qt | **LVGL** | Lightweight, production-grade |
 | 2 | Audio API + Codec | ALSA/PulseAudio | **ALSA + USB Audio** | Easy to use, embedded standard |
 | 3 | Voice Trigger | Wake word/PTT | **Push-to-talk (PTT)** | Simpler, reliable, practical |
-| 4 | AI Backend + Network | Cloud/Local + Eth/USB | **Local, via Ethernet (RJ45)** | Privacy; resolves v1's contradiction between the decision log (USB) and constraints table (Ethernet) in favor of simpler static-IP networking |
+| 4 | AI Backend + Network | Cloud/Local + Eth/USB | **Local, via Ethernet (RJ45)** | Privacy; resolves contradiction between the decision log (USB) and constraints table (Ethernet) in favor of simpler static-IP networking |
 | 5 | TTS | eSpeak-ng/Flite/Remote | **eSpeak-ng** | Offline, lightweight, good enough |
-| 6 | STT | None specified in v1 | **whisper.cpp server / faster-whisper-server, separate from LM Studio** | LM Studio has no transcription endpoint (confirmed during this review) |
+| 6 | STT | None specified | **whisper.cpp server / faster-whisper-server, separate from LM Studio** | LM Studio has no transcription endpoint (confirmed during this review) |
 | 7 | Serialization | Protobuf/JSON/CBOR | **JSON** | Human-readable, simple |
 | 8 | GPIO API | sysfs/libgpiod | **libgpiod** | Modern, chardev, not deprecated |
-| 9 | Event Bus | Callback chaining/queue | **In-process thread-safe queue, single consumer** | Avoids cross-thread races into LVGL (resolves v1's "Not decide") |
-| 10 | LCD Driver | fbtft / DRM / custom spidev | **fbtft** | decided on hardware, it's working! |
+| 9 | Event Bus | Callback chaining/queue | **In-process thread-safe queue, single consumer** | Avoids cross-thread races into LVGL |
+| 10 | LCD Driver | fbtft / DRM / custom spidev | **fbtft** | fbtft ili9341 |
 
 ---
 

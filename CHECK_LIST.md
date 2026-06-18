@@ -14,8 +14,12 @@
     - [x] Hello World! trên BBB với C++
     - [ ] CMake và Makefile compile
 
-- [ ] Xử lý thư viện
+- [ ] Xử lý thư viện, package, dependency
     - [ ] LVGL
+    - [ ] Alsa
 
 ### 3. Kickstart!
 - [ ] Chuẩn bị base structure
+- [ ] Chuẩn bị test code nhanh hardware (nằm trong base structure)
+- [ ] Các thành phần cơ bản phải compile được
+

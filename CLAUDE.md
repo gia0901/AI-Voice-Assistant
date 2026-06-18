@@ -20,7 +20,7 @@ Build a complete embedded Linux device on BeagleBone Black with:
 
 | Aspect | Value |
 |--------|-------|
-| **Learning** | Device driver utilization, HAL design, embedded Linux system programming |
+| **Learning** | Device driver utilization, HAL design, OOP mindset, Modern C++17, Embedded Linux system programming |
 | **Engineering** | Modern C++17, design patterns, embedded linux architecture |
 | **Practical** | Production-quality code, error handling, logging, testing |
 | **Extensible** | Easy to swap hardware, AI backend, or add new features |
@@ -34,7 +34,7 @@ Build a complete embedded Linux device on BeagleBone Black with:
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-1 | Record audio while PTT button is held, or until FR-8 timeout | Must have |
-| FR-2 | Speech-to-text via a local Whisper server (separate from LM Studio — see Section 5.2) | Must have |
+| FR-2 | Speech-to-text via a local Whisper server (separate from LM Studio — see Section 5) | Must have |
 | FR-3 | Chat completion with local LLM via LM Studio's OpenAI-compatible API | Must have |
 | FR-4 | Text-to-speech (eSpeak-ng) + audio playback | Must have |
 | FR-5 | Display status and responses on ILI9341 LCD | Must have |
@@ -44,8 +44,8 @@ Build a complete embedded Linux device on BeagleBone Black with:
 
 ### 📊 Non-Functional Requirements
 
-| ID | Requirement | Target |
-|----|-------------|--------|
+| ID | Requirement | Target | Notes / Justification |
+|----|-------------|--------|-----------------------|
 | NFR-1 | Response time (PTT release → TTS audio starts) | < 5 seconds | Budget: network round-trip ~50ms, STT ~0.5-1.5s, LLM ~1-3s (depends on model size/PC), TTS synth ~0.2-0.5s. This is dominated by the PC, not the BBB — keep models small. |
 | NFR-2 | RAM usage on BBB | < 200 MB | See Section 10 for the breakdown that makes this achievable. |
 | NFR-3 | Boot time | < 30 seconds | Excludes network service availability — boot completing doesn't mean LM Studio/Whisper are reachable yet; app must handle "PC not ready" gracefully on startup. |
@@ -57,9 +57,9 @@ Build a complete embedded Linux device on BeagleBone Black with:
 | Constraint | Details |
 |------------|---------|
 | **Hardware** | BeagleBone Black Rev C (512 MB RAM, 4 GB eMMC, 16 GB SD card) |
-| **OS** | Linux (kernel 5.10.x), official distro: https://www.beagleboard.org/distros/beaglebone-black-debian-12-14-2026-05-19-iot-v5-10-ti |
+| **OS** | Linux (kernel 5.10.x), official distro: https://www.beagleboard.org/distros/beaglebone-black-debian-12-14-2026-05-19-iot-v5-10-ti . (A Buildroot tree exists under `buildroot/` as a side experiment for a custom rootfs/kernel — it is **not** the shipping rootfs; the official Debian image is.) |
 | **System Configuration** | Device Tree overlay, modify via `/boot/uEnv.txt` |
-| **Network** | Ethernet (RJ45) on the same LAN/switch as the PC running LM Studio + Whisper server. (favor of Ethernet for simplicity of static IPs and because BBB also needs general internet access for `apt`.) |
+| **Network** | Two links, two roles: **(a) USB gadget Ethernet (`192.168.7.x`)** — used during development for SSH + `deploy.sh` (no extra cabling, see `prepare.sh`); **(b) RJ45 Ethernet on the LAN** — used at runtime to reach the PC's LM Studio + Whisper server and for general internet (`apt`). Give the BBB a static IP / DHCP reservation on the LAN. (BBB can also reach the internet over the USB gadget link via IP-forwarding/NAT on the dev PC if RJ45 isn't connected.) |
 | **AI Server** | LM Studio on a separate PC (OpenAI-compatible chat completions API) |
 | **STT Server** | A local Whisper server (`whisper.cpp` server or `faster-whisper-server`) on the same PC, separate process/port from LM Studio |
 | **Display** | ILI9341 SPI TFT LCD, 320×240, RGB565 |
@@ -69,9 +69,7 @@ Build a complete embedded Linux device on BeagleBone Black with:
 
 ---
 
-## 🏗️ Architecture 
-
-## 🗂️ Project Structure
+## 4. 🏗️ Architecture
 
 ### 4.1 Layers
 
@@ -133,7 +131,11 @@ Playback thread → plays PCM                                  → PlaybackCompl
 |-----------|------|------|-------|
 | LM Studio server | PC | `1234` | OpenAI-compatible `/v1/chat/completions` |
 | Whisper server | PC | e.g. `9000` (whisper.cpp server default differs by build) | Confirm exact endpoint path when you set it up — `whisper.cpp`'s bundled server and third-party OpenAI-shaped wrappers (`faster-whisper-server`) use different paths; don't assume `/v1/audio/transcriptions` works until you've tested it against your specific server. |
-| BBB app | BeagleBone | — | Connects out to both via static LAN IPs |
+| BBB app | BeagleBone | — | Reaches both servers over the **RJ45 LAN** at runtime, via static LAN IPs in `config.json` |
+
+Two physical links, distinct roles:
+- **USB gadget Ethernet (`192.168.7.x`)** — development only: SSH + `deploy.sh` push the binary/config to the board (see `prepare.sh`, which targets `gia@192.168.7.2`). Convenient because it's the same USB cable that powers the board.
+- **RJ45 Ethernet (LAN)** — runtime: the app connects out to LM Studio + Whisper on the PC, and the board uses this for `apt`/internet. The two AI server IPs in `config.json` are LAN IPs, not `192.168.7.x`.
 
 Recommendations:
 - Give the PC and BBB static IPs on the LAN (or DHCP reservations) so `config.json` doesn't need to change every reboot.
@@ -157,65 +159,74 @@ Recommendations:
 | Logging | **spdlog** | Fast, async, modern C++ | syslog |
 | GPIO | **libgpiod** | Modern chardev API, actively maintained | sysfs (legacy, deprecated) |
 | HTTP | **libcurl** | Robust, well-tested for REST calls | cpp-httplib (header-only) |
-| Network topology | **Ethernet (RJ45), static IPs** | Matches constraint table; simpler than USB gadget networking; one network for both LAN-to-PC and general internet | USB gadget Ethernet (192.168.7.x) if you want single-cable power+data |
+| Network topology | **RJ45 Ethernet (static IPs) at runtime + USB gadget (`192.168.7.x`) for dev/deploy** | RJ45 gives one LAN for both PC servers and internet; USB gadget gives single-cable power+data during development | Single link only (drop USB gadget once on-LAN) |
 
 ---
 
 ## 7. 🗂️ Project Structure
 
+> Dirs/files marked `(planned)` don't exist yet — they're the target layout for Weeks 2–4. Everything else is in the repo today.
+
 ```
-bbb-voice-assistant/
-├── CMakeLists.txt
+AI-Voice-Assistant/
+├── CLAUDE.md                         # this file — the master plan
+├── CHECK_LIST.md                     # live bring-up / progress tracking
 ├── README.md
-├── toolchain/
-│   └── bbb-toolchain.cmake           # cross-compile toolchain file (Section 11)
-├── docs/
-│   ├── PLAN.md                       # this file
-│   ├── architecture.md               # records which display-driver path was chosen, and why
-│   ├── timeline.md
-│   ├── troubleshooting.md
-│   └── development/
-│       ├── coding_guide.md
-│       ├── device_driver.md
-│       ├── hal_layer.md
-│       └── app_layer.md
+├── prepare.sh                        # exports cross-toolchain PATH + BBB_PATH (deploy target)
+├── CMakeLists.txt                    # (planned) top-level build
+├── toolchain/                        # (planned) bbb-toolchain.cmake — CMake cross-compile file (Section 11)
+│   └── bbb-toolchain.cmake
+├── .toolchain/
+│   └── crosstool-ng/                 # crosstool-ng source tree (builds arm-cortex_a8-linux-gnueabihf)
+├── buildroot/                        # side experiment for a custom rootfs/kernel — NOT the shipping rootfs
+│   └── my_config/.config
+├── .docs/
+│   ├── architecture.md               # interfaces, thread model, chosen display-driver path (EN)
+│   ├── env_setup.md                  # toolchain, sysroot, deploy loop (EN)
+│   ├── timeline.md                   # 4-week day-by-day plan (EN)
+│   ├── troubleshooting.md            # symptom→cause→fix by subsystem (EN)
+│   ├── development/                  # coding_guide / device_driver / hal_layer / app_layer (Vietnamese, see §18)
+│   └── knowledge/                    # threading / audio_alsa / cross_compile + README index (Vietnamese, see §18)
 │
-├── hal/
+├── hal/                              # (planned) HAL Layer
 │   ├── include/
 │   ├── audio/
 │   ├── display/                      # fbdev OR drm backend, per architecture.md decision
 │   └── gpio/
 │
-├── middleware/
+├── middleware/                       # (planned) Middleware Layer
 │   ├── audio_pipeline/
-│   ├── stt_client/                   # NEW — talks to the local Whisper server
-│   ├── llm_client/                   # renamed from "ai_client" — talks to LM Studio only
+│   ├── stt_client/                   # talks to the local Whisper server
+│   ├── llm_client/                   # talks to LM Studio only
 │   └── tts/
 │
-├── app/
+├── app/                              # Application Layer
+│   ├── CMakeLists.txt
+│   └── main.cpp                      # current entry point (hardware quick-test stage)
 │
-├── common/
+├── common/                           # (planned)
 │   ├── Logger.hpp
 │   ├── Config.hpp
 │   ├── Types.hpp
-│   └── EventBus.hpp                  # NEW — queue-based, see Section 4.2
+│   └── EventBus.hpp                  # queue-based, see Section 4.2
 │
-├── config/
+├── config/                           # (planned)
 │   └── config.json                   # host/port for LM Studio + Whisper server, GPIO pin map, timeouts
 │
-├── scripts/
+├── scripts/                          # (planned)
 │   ├── build.sh
 │   ├── deploy.sh                     # rsync/scp binary + restart systemd service
-│   └── check_board.sh                # NEW — runs the Section 4.4 driver-availability checks
+│   └── check_board.sh                # runs the Section 4.4 driver-availability checks
 │
-├── tests/
+├── tests/                            # (planned)
 │   ├── hal/
 │   ├── middleware/
 │   └── app/
 │
 └── kernel/
     └── overlays/
-        └── BBB-VOICE-ASSISTANT.dts   # device tree overlay — content depends on driver path chosen
+        ├── BBB-VOICE-ASSISTANT.dts   # device tree overlay (SPI0 + ILI9341 fbtft + GPIO)
+        └── copy_dtbo.sh              # builds/installs the compiled overlay to the board
 ```
 ---
 
@@ -244,14 +255,11 @@ VAD removed (out of scope per your own decision log); replaced with the FR-8 har
           │    └────────────┘                         │
           │       │ AI response received              │
           │       ▼                                   │
-          │    ┌──────────┐                           │
-          │    │ SPEAKING │──── TTS complete ─────────┘
-          │    └──────────┘
-          │       │ PTT press (interrupt)
-          │       ▼
-          │    ┌────────┐
-          └─── │ CANCEL │
-               └────────┘
+          │    ┌──────────┐   TTS complete            │
+          └────│ SPEAKING │───────────────────────────┘
+               └──────────┘
+                  ▲
+                  └── PTT press (interrupt): stop playback → IDLE
 ```
 
 ### Valid state transitions
@@ -299,10 +307,10 @@ This budget confirms NFR-2 is realistic without needing to do anything unusual �
 
 Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow and not recommended for iterative development.
 
-1. **Cross-compile on the Ubuntu 22.04 VM.** Install an ARM cross toolchain matching the BBB's userspace (e.g. `gcc-arm-linux-gnueabihf` family, or BeagleBoard's published cross toolchain for the specific Debian image you're using).
+1. **Cross-compile on the Ubuntu 22.04 VM** using a **crosstool-ng**-built toolchain targeting the BBB's Cortex-A8 hard-float userspace. The toolchain is built from the `.toolchain/crosstool-ng/` tree and installed to `/home/gia/x-tools/arm-cortex_a8-linux-gnueabihf/` (prefix `arm-cortex_a8-linux-gnueabihf-`). `prepare.sh` puts its `bin/` on `PATH` and exports `BBB_PATH` for deploys. (crosstool-ng is chosen over a packaged `gcc-arm-linux-gnueabihf` so the toolchain's glibc/ABI is pinned to match the board exactly.)
 2. **Build a sysroot** by copying `/usr/lib`, `/usr/include`, and relevant headers from the actual BBB (via `rsync` over the network) rather than guessing library versions — this avoids ABI mismatches with whatever libcurl/ALSA versions ship on the board.
-3. **Write a CMake toolchain file** (`toolchain/bbb-toolchain.cmake`) setting `CMAKE_SYSTEM_NAME=Linux`, `CMAKE_SYSTEM_PROCESSOR=arm`, the cross compiler paths, and `CMAKE_FIND_ROOT_PATH` to the sysroot.
-4. **`scripts/deploy.sh`** should `rsync`/`scp` the built binary + `config/config.json` to the BBB and restart the systemd service — don't hand-copy files during development, it doesn't scale past day 2.
+3. **Write a CMake toolchain file** (`toolchain/bbb-toolchain.cmake`) setting `CMAKE_SYSTEM_NAME=Linux`, `CMAKE_SYSTEM_PROCESSOR=arm`, the `arm-cortex_a8-linux-gnueabihf-` compiler paths, and `CMAKE_FIND_ROOT_PATH` to the sysroot.
+4. **`scripts/deploy.sh`** should `rsync`/`scp` the built binary + `config/config.json` to the BBB (over the USB gadget link, `$BBB_PATH`) and restart the systemd service — don't hand-copy files during development, it doesn't scale past day 2.
 5. **systemd service**, not a manual run script, for the final deliverable — gives you auto-restart on crash and clean boot integration, and is what NFR-3 (boot time) implicitly assumes.
 ---
 
@@ -344,17 +352,19 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 
 ## 15. 📚 Documentation Index
 
-| Document | Content |
-|----------|---------|
-| [CLAUDE.md](CLAUDE.md) | Overview, requirements, architecture, decisions (this file) |
-| [CHECK_LIST.md](CHECK_LIST.md) | Tracking current status |
-| [architecture.md](architecture.md) | Interface definitions, class diagrams, thread model, **chosen display-driver path and why** |
-| [env_setup.md](env_setup.md) | Setup environment, packages, dependencies, cross-compile toolchain |
-| [timeline.md](timeline.md) | 4-week plan with daily tasks |
-| [troubleshooting.md](troubleshooting.md) | Common issues and solutions |
-| [development/coding_guide.md](development/coding_guide.md) | C++17 patterns, error handling, design patterns, logging, project conventions |
-| [development/hal_layer.md](development/hal_layer.md) | HAL interface design, shared library, mock pattern |
-| [development/app_layer.md](development/app_layer.md) | State machine, EventBus, LVGL UI, ButtonController |
+| Document | Content | Lang |
+|----------|---------|------|
+| [CLAUDE.md](CLAUDE.md) | Overview, requirements, architecture, decisions (this file) | EN |
+| [CHECK_LIST.md](CHECK_LIST.md) | Tracking current status | mixed |
+| [.docs/architecture.md](.docs/architecture.md) | Interface definitions, class sketches, thread model, **chosen display-driver path and why** | EN |
+| [.docs/env_setup.md](.docs/env_setup.md) | Setup environment, packages, dependencies, crosstool-ng toolchain | EN |
+| [.docs/timeline.md](.docs/timeline.md) | 4-week plan with daily tasks | EN |
+| [.docs/troubleshooting.md](.docs/troubleshooting.md) | Common issues and solutions, by subsystem | EN |
+| [.docs/development/coding_guide.md](.docs/development/coding_guide.md) | C++17 patterns, error handling, design patterns, logging, conventions | VI |
+| [.docs/development/device_driver.md](.docs/development/device_driver.md) | SPI, Device Tree overlay, fbtft binding for ILI9341 | VI |
+| [.docs/development/hal_layer.md](.docs/development/hal_layer.md) | HAL interface design, shared library, mock pattern | VI |
+| [.docs/development/app_layer.md](.docs/development/app_layer.md) | State machine, EventBus, LVGL UI, ButtonController | VI |
+| [.docs/knowledge/](.docs/knowledge/README.md) | Foundations: concurrency, ALSA audio, cross-compilation | VI |
 
 ---
 
@@ -365,7 +375,7 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 | 1 | GUI Framework + Backend | Raw FB/LVGL/Qt | **LVGL** | Lightweight, production-grade |
 | 2 | Audio API + Codec | ALSA/PulseAudio | **ALSA + USB Audio** | Easy to use, embedded standard |
 | 3 | Voice Trigger | Wake word/PTT | **Push-to-talk (PTT)** | Simpler, reliable, practical |
-| 4 | AI Backend + Network | Cloud/Local + Eth/USB | **Local, via Ethernet (RJ45)** | Privacy; resolves contradiction between the decision log (USB) and constraints table (Ethernet) in favor of simpler static-IP networking |
+| 4 | AI Backend + Network | Cloud/Local + Eth/USB | **Local; RJ45 LAN at runtime, USB gadget (`192.168.7.x`) for dev/deploy** | Privacy (local only); RJ45 reaches PC servers + internet, USB gadget is the convenient single-cable dev/deploy link (see `prepare.sh`) |
 | 5 | TTS | eSpeak-ng/Flite/Remote | **eSpeak-ng** | Offline, lightweight, good enough |
 | 6 | STT | None specified | **whisper.cpp server / faster-whisper-server, separate from LM Studio** | LM Studio has no transcription endpoint (confirmed during this review) |
 | 7 | Serialization | Protobuf/JSON/CBOR | **JSON** | Human-readable, simple |
@@ -382,3 +392,12 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 - Vietnamese or multi-language support (English only)
 - Cloud AI integration (local only)
 - OTA firmware updates
+
+---
+
+## 18. Rules
+- Only **`.docs/development/...`** and **`.docs/knowledge/...`** documents are written in Vietnamese (not everything, if some terminologies/keywords/... are easier to understand in English, use it.)
+- **`.docs/development/...`** and **`.docs/knowledge/...`** should be written for best learning purpose: System thinking, Foundation thinking, Comparing available solutions, Making decisions,...
+- **Coding Style**: Standard Modern C++ style is prefer, details in coding_guide.md.
+- The rest of documents must be written in English, even when our converstations are in Vietnamese.
+- All topics must be explained clearly, **DO NOT** over-engineering, over-complicated.

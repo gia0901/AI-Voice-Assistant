@@ -8,17 +8,19 @@
 
 Toàn hệ thống là **1 process, nhiều thread**, giao tiếp qua **một hàng đợi thread-safe duy nhất** (`EventBus`). Main thread là *consumer duy nhất*; mọi thread khác chỉ *push* event.
 
-```
-GPIO thread ─┐
-Capture ─────┤  push()
-Playback ────┼────────►  EventBus (queue + mutex + condition_variable)
-Net ×2 ──────┘                       │ pop(timeout)
-                                     ▼
-                        Main thread (consumer):
-                        while(running):
-                          ev = bus.pop(10ms)
-                          if ev: stateMachine.handle(ev)
-                          lv_timer_handler()      // vẽ UI
+```mermaid
+flowchart LR
+    GPIO["GPIO thread"]
+    Cap["Capture"]
+    Play["Playback"]
+    Net["Net ×2"]
+    Bus(["EventBus<br/>queue + mutex + condition_variable"])
+    Main["Main thread (consumer)<br/>while(running):<br/>&nbsp;&nbsp;ev = bus.pop(10ms)<br/>&nbsp;&nbsp;if ev: stateMachine.handle(ev)<br/>&nbsp;&nbsp;lv_timer_handler()  // vẽ UI"]
+    GPIO -->|push| Bus
+    Cap -->|push| Bus
+    Play -->|push| Bus
+    Net -->|push| Bus
+    Bus -->|pop timeout| Main
 ```
 
 Vì sao **không** dùng callback chaining (thread A gọi thẳng hàm của thread B)? Vì đó là cái bẫy race condition: ví dụ GPIO thread gọi thẳng `lv_label_set_text()` → LVGL không thread-safe → crash ngẫu nhiên, cực khó debug (CLAUDE.md Risk Register). Hàng đợi một-consumer **tuần tự hóa** mọi sự kiện về một thread → không còn race vào UI/FSM.
@@ -75,10 +77,21 @@ private:
 
 Theo CLAUDE.md §8 (đã bỏ CANCEL — ngắt là transition action, không phải state riêng):
 
-```
-INIT → IDLE → LISTENING → PROCESSING → SPEAKING → IDLE
-                  │ (timeout FR-8)         │ (lỗi)
-                  └──────────► IDLE/ERROR ◄┘
+```mermaid
+stateDiagram-v2
+    [*] --> INIT
+    INIT --> IDLE: hw init done
+    IDLE --> LISTENING: PTT press
+    LISTENING --> PROCESSING: PTT release
+    LISTENING --> IDLE: timeout (FR-8)
+    PROCESSING --> SPEAKING: AI response
+    PROCESSING --> IDLE: no response / net error
+    SPEAKING --> IDLE: TTS complete
+    SPEAKING --> IDLE: PTT interrupt → stop playback
+    LISTENING --> ERROR
+    PROCESSING --> ERROR
+    SPEAKING --> ERROR
+    ERROR --> IDLE: PTT press (retry)
 ```
 
 | State | Vào khi | Hành động khi vào | Rời khi |

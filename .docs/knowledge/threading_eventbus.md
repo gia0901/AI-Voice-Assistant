@@ -31,6 +31,25 @@ Dự án chọn cách 3. Triết lý: *"Don't communicate by sharing memory; sha
 
 Nếu chỉ **một** thread chạm vào StateMachine và LVGL, thì state đó **không còn là shared** giữa nhiều thread nữa → không cần khóa quanh nó, không thể có data race trên nó. Mọi phức tạp đồng bộ co lại còn đúng một chỗ: hàng đợi.
 
+```mermaid
+flowchart LR
+    subgraph many["Nhiều producer thread"]
+        T1["GPIO"]
+        T2["Capture"]
+        T3["Playback"]
+        T4["Net ×2"]
+    end
+    Q(["Hàng đợi<br/>mutex + cv"])
+    subgraph one["Một consumer (main thread)"]
+        S["StateMachine + LVGL<br/><i>không cần khóa</i>"]
+    end
+    T1 & T2 & T3 & T4 -->|push| Q
+    Q -->|pop tuần tự| S
+    Bad["GPIO gọi thẳng lv_*()"] -.->|❌ data race, cấm| S
+```
+
+> Đường gạch đỏ là cái bẫy: thread phụ gọi thẳng vào LVGL/FSM. Mô hình hàng đợi loại bỏ đường đó *về mặt thiết kế*.
+
 Hàng đợi chỉ cần:
 - `std::mutex` bảo vệ thao tác push/pop.
 - `std::condition_variable` để consumer ngủ khi rỗng, thức khi có việc (không busy-wait tốn CPU — quan trọng trên BBB single-core).

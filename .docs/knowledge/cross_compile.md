@@ -12,6 +12,23 @@ BBB là Cortex-A8 đơn nhân @1GHz, 512MB RAM. Biên dịch C++ (template, LVGL
 - **Target**: máy *chạy chương trình* (BBB, ARM hardfloat).
 - **Cross toolchain**: bộ gcc/g++/binutils chạy trên host nhưng phát mã cho target.
 
+```mermaid
+flowchart LR
+    subgraph Host["Host — Ubuntu VM (x86-64)"]
+        SRC["Source C++"]
+        TC["Cross toolchain<br/>arm-cortex_a8-linux-gnueabihf-g++"]
+        SYS["Sysroot<br/>(lib/header copy từ board)"]
+        SRC --> TC
+        SYS -.->|link| TC
+    end
+    BIN["Binary ARM hardfloat"]
+    subgraph Target["Target — BBB (ARM)"]
+        RUN["chạy binary"]
+    end
+    TC --> BIN
+    BIN -->|rsync qua USB gadget| RUN
+```
+
 Tên toolchain mã hóa target: `arm-cortex_a8-linux-gnueabihf`:
 - `arm` — kiến trúc
 - `cortex_a8` — vi kiến trúc CPU

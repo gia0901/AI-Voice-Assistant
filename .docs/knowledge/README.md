@@ -10,6 +10,7 @@
 | [threading_eventbus.md](threading_eventbus.md) | Concurrency, race condition, mô hình hàng đợi một-consumer, move qua thread |
 | [audio_alsa.md](audio_alsa.md) | PCM, sample rate/bit depth, ALSA `hw`/`plughw`, period/buffer, xrun, software gain |
 | [cross_compile.md](cross_compile.md) | Host vs target, toolchain ABI hardfloat, sysroot, vì sao crosstool-ng |
+| [ai_server.md](ai_server.md) | PC server: vì sao 2 server tách (STT+LLM), Whisper/ASR, GGUF/quantization, chọn model theo VRAM, ngân sách độ trễ. Thao tác: [../server_setup.md](../server_setup.md) |
 
 ## Sẽ bổ sung khi gặp (gợi ý)
 

@@ -66,7 +66,7 @@ To avoid ABI guesswork, copy the real libraries/headers off the BBB rather than 
 
 ```bash
 mkdir -p ~/bbb-sysroot
-rsync -avz --rsync-path="sudo rsync" \
+rsync -avz --rsync-path="sudo -S rsync" \
     gia@192.168.7.2:/usr/lib gia@192.168.7.2:/usr/include \
     gia@192.168.7.2:/lib \
     ~/bbb-sysroot/

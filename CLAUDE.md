@@ -73,21 +73,20 @@ Build a complete embedded Linux device on BeagleBone Black with:
 
 ### 4.1 Layers
 
+```mermaid
+flowchart TB
+    App["<b>App Layer</b><br/>StateMachine · EventBus · LVGL UI · ButtonController"]
+    Mid["<b>Middleware Layer</b><br/>AudioPipeline · SttClient · LlmClient · TtsEngine"]
+    Hal["<b>HAL Layer</b> (shared libs, mockable)<br/>AudioHAL (ALSA) · DisplayHAL (fbdev/DRM) · GpioHAL"]
+    Common["<b>Common</b><br/>Logger (spdlog) · Config (nlohmann/json) · Types · EventBus core"]
+    App -->|depends on| Mid
+    Mid -->|depends on| Hal
+    Hal -->|depends on| Common
+    App -.->|uses| Common
+    Mid -.->|uses| Common
 ```
-┌─────────────────────────────────────────────────────────┐
-│  App Layer                                              │
-│  StateMachine | EventBus | LVGL UI | ButtonController   │
-├─────────────────────────────────────────────────────────┤
-│  Middleware Layer                                       │
-│  AudioPipeline | SttClient | LlmClient | TtsEngine      │
-├─────────────────────────────────────────────────────────┤
-│  HAL Layer (shared libs, mockable)                      │
-│  AudioHAL (ALSA) | DisplayHAL (fbdev/DRM) | GpioHAL     │
-├─────────────────────────────────────────────────────────┤
-│  Common                                                 │
-│  Logger (spdlog) | Config (nlohmann/json) | Types | EventBus core │
-└─────────────────────────────────────────────────────────┘
-```
+
+> Dependencies point **downward only** — an upper layer may use the one below it, never the reverse.
 
 `SttClient` and `LlmClient` are two separate middleware components (each a thin HTTP client) rather than one "AiClient" — they talk to two different servers on the PC with two different APIs. This is the direct fix for the LM-Studio-doesn't-do-STT gap.
 
@@ -105,16 +104,35 @@ A single process, multiple threads, one in-process thread-safe queue (`EventBus`
 
 ### 4.3 Sequence: one PTT interaction
 
-```
-PTT press   → GPIO thread → ButtonEvent(PTT_DOWN)         → StateMachine: IDLE → LISTENING
-                                                              starts Audio capture thread
-PTT release → GPIO thread → ButtonEvent(PTT_UP)            → StateMachine: LISTENING → PROCESSING
-                                                              Audio capture thread → RecordingComplete
-Network thread → SttClient.transcribe(buffer)               → SttResult(text)
-Network thread → LlmClient.chat(text)                        → LlmResult(reply)
-Main thread     → TtsEngine.synthesize(reply) → PCM          → StateMachine: PROCESSING → SPEAKING
-Playback thread → plays PCM                                  → PlaybackComplete
-                                                              → StateMachine: SPEAKING → IDLE
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant GPIO as GPIO thread
+    participant FSM as StateMachine (main)
+    participant Cap as Capture thread
+    participant Net as Network worker
+    participant TTS as TtsEngine (main)
+    participant Play as Playback thread
+
+    User->>GPIO: PTT press
+    GPIO->>FSM: ButtonEvent(PTT_DOWN)
+    Note over FSM: IDLE → LISTENING
+    FSM->>Cap: start capture
+    User->>GPIO: PTT release
+    GPIO->>FSM: ButtonEvent(PTT_UP)
+    Note over FSM: LISTENING → PROCESSING
+    Cap->>FSM: RecordingComplete(buffer)
+    FSM->>Net: SttClient.transcribe(buffer)
+    Net->>FSM: SttResult(text)
+    FSM->>Net: LlmClient.chat(text)
+    Net->>FSM: LlmResult(reply)
+    FSM->>TTS: synthesize(reply)
+    TTS->>FSM: PCM
+    Note over FSM: PROCESSING → SPEAKING
+    FSM->>Play: play(PCM)
+    Play->>FSM: PlaybackComplete
+    Note over FSM: SPEAKING → IDLE
 ```
 
 ### 4.4 Display driver — decision gate (resolve in Week 1, Day 1)
@@ -183,10 +201,12 @@ AI-Voice-Assistant/
 ├── .docs/
 │   ├── architecture.md               # interfaces, thread model, chosen display-driver path (EN)
 │   ├── env_setup.md                  # toolchain, sysroot, deploy loop (EN)
+│   ├── server_setup.md               # PC AI server (LM Studio + faster-whisper) setup (EN)
 │   ├── timeline.md                   # 4-week day-by-day plan (EN)
 │   ├── troubleshooting.md            # symptom→cause→fix by subsystem (EN)
 │   ├── development/                  # coding_guide / device_driver / hal_layer / app_layer (Vietnamese, see §18)
-│   └── knowledge/                    # threading / audio_alsa / cross_compile + README index (Vietnamese, see §18)
+│   ├── implementation/               # per-component build guides, numbered 00..11 + README (Vietnamese, see §18)
+│   └── knowledge/                    # strategy_roadmap / threading / audio_alsa / cross_compile / ai_server + README (Vietnamese, see §18)
 │
 ├── hal/                              # (planned) HAL Layer
 │   ├── include/
@@ -234,32 +254,22 @@ AI-Voice-Assistant/
 
 VAD removed (out of scope per your own decision log); replaced with the FR-8 hard timeout.
 
-```
-               ┌──────┐
-  power on ──► │ INIT │
-               └──────┘
-                  │ hw init complete
-                  ▼
-               ┌──────┐
-          ┌──► │ IDLE │ ◄─────────────────────────────┐
-          │    └──────┘                               │
-          │       │ PTT press                         │
-          │       ▼                                   │
-          │    ┌───────────┐                          │
-          │    │ LISTENING │──── timeout (FR-8, 15s) ─┤
-          │    └───────────┘                          │
-          │       │ PTT release                       │
-          │       ▼                                   │
-          │    ┌────────────┐                         │
-          │    │ PROCESSING │──── error ──────────────┤
-          │    └────────────┘                         │
-          │       │ AI response received              │
-          │       ▼                                   │
-          │    ┌──────────┐   TTS complete            │
-          └────│ SPEAKING │───────────────────────────┘
-               └──────────┘
-                  ▲
-                  └── PTT press (interrupt): stop playback → IDLE
+```mermaid
+stateDiagram-v2
+    [*] --> INIT
+    INIT --> IDLE: hw init complete
+    INIT --> ERROR: init failure
+    IDLE --> LISTENING: PTT press
+    LISTENING --> PROCESSING: PTT release
+    LISTENING --> IDLE: timeout (FR-8, 15s)
+    LISTENING --> ERROR
+    PROCESSING --> SPEAKING: AI response received
+    PROCESSING --> IDLE: no response / network error
+    PROCESSING --> ERROR
+    SPEAKING --> IDLE: TTS complete
+    SPEAKING --> IDLE: PTT interrupt → stop playback
+    SPEAKING --> ERROR
+    ERROR --> IDLE: PTT press (retry, no app restart)
 ```
 
 ### Valid state transitions
@@ -358,13 +368,15 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 | [CHECK_LIST.md](CHECK_LIST.md) | Tracking current status | mixed |
 | [.docs/architecture.md](.docs/architecture.md) | Interface definitions, class sketches, thread model, **chosen display-driver path and why** | EN |
 | [.docs/env_setup.md](.docs/env_setup.md) | Setup environment, packages, dependencies, crosstool-ng toolchain | EN |
+| [.docs/server_setup.md](.docs/server_setup.md) | PC AI server setup: LM Studio + faster-whisper-server on Windows+NVIDIA, LAN exposure | EN |
 | [.docs/timeline.md](.docs/timeline.md) | 4-week plan with daily tasks | EN |
 | [.docs/troubleshooting.md](.docs/troubleshooting.md) | Common issues and solutions, by subsystem | EN |
 | [.docs/development/coding_guide.md](.docs/development/coding_guide.md) | C++17 patterns, error handling, design patterns, logging, conventions | VI |
 | [.docs/development/device_driver.md](.docs/development/device_driver.md) | SPI, Device Tree overlay, fbtft binding for ILI9341 | VI |
 | [.docs/development/hal_layer.md](.docs/development/hal_layer.md) | HAL interface design, shared library, mock pattern | VI |
 | [.docs/development/app_layer.md](.docs/development/app_layer.md) | State machine, EventBus, LVGL UI, ButtonController | VI |
-| [.docs/knowledge/](.docs/knowledge/README.md) | Foundations: concurrency, ALSA audio, cross-compilation | VI |
+| [.docs/implementation/](.docs/implementation/README.md) | Per-component build guides (scaffold + algorithm hints + tests), build order | VI |
+| [.docs/knowledge/](.docs/knowledge/README.md) | Foundations: concurrency, ALSA audio, cross-compilation, AI server | VI |
 
 ---
 
@@ -396,8 +408,9 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 ---
 
 ## 18. Rules
-- Only **`.docs/development/...`** and **`.docs/knowledge/...`** documents are written in Vietnamese (not everything, if some terminologies/keywords/... are easier to understand in English, use it.)
-- **`.docs/development/...`** and **`.docs/knowledge/...`** should be written for best learning purpose: System thinking, Foundation thinking, Comparing available solutions, Making decisions,...
+- Only **`.docs/development/...`**, **`.docs/knowledge/...`** and **`.docs/implementation/...`** documents are written in Vietnamese (not everything, if some terminologies/keywords/... are easier to understand in English, use it.)
+- **`.docs/development/...`**, **`.docs/knowledge/...`** and **`.docs/implementation/...`** should be written for best learning purpose: System thinking, Foundation thinking, Comparing available solutions, Making decisions,...
+- **`.docs/implementation/...`** guides provide scaffolding (interface, build order, algorithm hints, test harness) with bodies left as `// TODO(you)` — they must **not** become copy-paste full solutions. Gia hand-codes; Claude reviews.
 - **Coding Style**: Standard Modern C++ style is prefer, details in coding_guide.md.
 - The rest of documents must be written in English, even when our converstations are in Vietnamese.
 - All topics must be explained clearly, **DO NOT** over-engineering, over-complicated.

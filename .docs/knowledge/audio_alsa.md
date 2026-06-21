@@ -40,9 +40,14 @@ Khái niệm cốt lõi:
 
 ## 3. Vòng đời capture & playback
 
-```
-open  → set hw params (rate, format, channels, period, buffer) → prepare
-      → vòng lặp readi()/writei() theo period → drain (playback) → close
+```mermaid
+flowchart LR
+    A["open"] --> B["set hw params<br/>rate · format · channels<br/>period · buffer"]
+    B --> C["prepare"]
+    C --> D["vòng lặp<br/>readi() / writei()<br/>theo period"]
+    D --> D
+    D --> E["drain<br/>(playback)"]
+    E --> F["close"]
 ```
 
 Capture (FR-1):

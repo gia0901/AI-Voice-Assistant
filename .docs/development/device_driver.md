@@ -6,16 +6,17 @@
 
 ## 1. Bức tranh tổng thể
 
-```
- LVGL (userspace)
-   │  vẽ vào framebuffer
-   ▼
- /dev/fb0  ◄── fbtft (fb_ili9341) tạo ra
-   │  fbtft dịch pixel RGB565 → lệnh SPI
-   ▼
- spi0 (kernel SPI master)  ──SCLK/MOSI──►  ILI9341 panel
-   │                        ──DC (gpio)──►  (chọn command/data)
-   └────────────────────────RESET (gpio)─►
+```mermaid
+flowchart TB
+    LVGL["LVGL (userspace)"]
+    FB["/dev/fb0<br/><i>do fbtft (fb_ili9341) tạo ra</i>"]
+    SPI["spi0 (kernel SPI master)"]
+    Panel["ILI9341 panel"]
+    LVGL -->|vẽ pixel RGB565 vào framebuffer| FB
+    FB -->|fbtft dịch pixel → lệnh SPI| SPI
+    SPI -->|SCLK / MOSI| Panel
+    SPI -->|DC gpio: chọn command/data| Panel
+    SPI -->|RESET gpio| Panel
 ```
 
 Điểm cốt lõi: **ta không tự viết driver**. Kernel đã có `fb_ili9341` (thuộc họ fbtft). Việc của ta là *khai báo phần cứng* qua Device Tree để kernel biết: "có một panel ILI9341 nối vào spi0, chân DC/RESET ở đây" — rồi kernel tự tạo `/dev/fb0`.

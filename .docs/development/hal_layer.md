@@ -13,11 +13,15 @@ Vấn đề: nếu `AudioPipeline` gọi thẳng `snd_pcm_readi()`, thì:
 
 Giải pháp: chèn một **ranh giới** — interface trừu tượng. Tầng trên chỉ thấy `IAudioHal`, không thấy ALSA. Đây là áp dụng **Dependency Inversion Principle**: module cấp cao phụ thuộc *abstraction*, không phụ thuộc *chi tiết*.
 
-```
-AudioPipeline ──depends on──► IAudioHal (abstraction)
-                                 ▲           ▲
-                          AlsaAudioHal   MockAudioHal
-                          (thật, trên BBB) (test, trên VM)
+```mermaid
+flowchart TB
+    AP["AudioPipeline<br/>(tầng trên)"]
+    I["IAudioHal<br/><i>abstraction (pure virtual)</i>"]
+    Alsa["AlsaAudioHal<br/>thật, trên BBB"]
+    Mock["MockAudioHal<br/>test, trên VM"]
+    AP -->|depends on| I
+    Alsa -.->|implements| I
+    Mock -.->|implements| I
 ```
 
 ---

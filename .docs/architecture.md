@@ -2,29 +2,26 @@
 
 > Companion to [CLAUDE.md](../CLAUDE.md). CLAUDE.md is the *what/why* (decisions); this file is the *how* (interfaces, classes, threads, data flow). Written in English per Rule §18.
 
+> **Diagram conventions (whole repo).** Pick the tool by diagram type:
+> - **Mermaid** for things with arrows/relationships that auto-layout better than hand-drawn art: state machines (`stateDiagram-v2`), interactions (`sequenceDiagram`), layer/dependency/concurrency/data-flow/topology (`flowchart`). Renders on GitHub & VS Code.
+> - **ASCII / tables** for positional or render-anywhere content: directory trees, hardware pin maps, register/bit layouts, SPI timing, memory budgets.
+> - One diagram = one idea; label edges with the event/trigger; keep direction consistent (layers top-down `TB`, pipelines left-right `LR`).
+
 ---
 
 ## 1. Layered overview
 
 The system is one process, split into four layers. Dependencies point **downward only** — an upper layer may call the layer directly below it, never the reverse. This keeps the HAL mockable and the middleware testable without hardware.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ App Layer                                                     │
-│   StateMachine · ButtonController · LvglUi                    │
-│   (consumes EventBus, drives middleware, owns the UI)         │
-├──────────────────────────────────────────────────────────────┤
-│ Middleware Layer                                             │
-│   AudioPipeline · SttClient · LlmClient · TtsEngine          │
-│   (policy/orchestration; no raw syscalls, no LVGL)           │
-├──────────────────────────────────────────────────────────────┤
-│ HAL Layer (shared libs, mockable)                           │
-│   IAudioHal(ALSA) · IDisplayHal(fbdev) · IGpioHal(libgpiod)  │
-│   (the only code that touches device nodes)                  │
-├──────────────────────────────────────────────────────────────┤
-│ Common                                                      │
-│   Logger(spdlog) · Config(nlohmann/json) · Types · EventBus  │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    App["<b>App Layer</b><br/>StateMachine · ButtonController · LvglUi<br/><i>consumes EventBus, drives middleware, owns the UI</i>"]
+    Mid["<b>Middleware Layer</b><br/>AudioPipeline · SttClient · LlmClient · TtsEngine<br/><i>policy/orchestration; no raw syscalls, no LVGL</i>"]
+    Hal["<b>HAL Layer</b> (shared libs, mockable)<br/>IAudioHal(ALSA) · IDisplayHal(fbdev) · IGpioHal(libgpiod)<br/><i>the only code that touches device nodes</i>"]
+    Common["<b>Common</b><br/>Logger(spdlog) · Config(nlohmann/json) · Types · EventBus"]
+    App --> Mid --> Hal --> Common
+    App -.-> Common
+    Mid -.-> Common
 ```
 
 **Rule of thumb for placement:** if it touches `/dev/*` it lives in HAL; if it makes a decision about *what to do next* it lives in App; everything that transforms data between those two (resampling, HTTP, JSON shaping, PCM synthesis) is middleware.
@@ -110,23 +107,23 @@ public:
 
 One consumer, many producers. The only shared mutable structure is the `EventBus` queue, which is internally locked. Nothing else is shared across threads — buffers are *moved* through events, not referenced.
 
-```
-   producers (push)                         consumer (pop)
- ┌────────────────┐
- │ GPIO thread    │──ButtonEvent────┐
- ├────────────────┤                 │
- │ Capture thread │──Recording*─────┤      ┌─────────────────────────┐
- ├────────────────┤                 ├────► │ EventBus (mutex + cv)   │
- │ Playback thread│──PlaybackDone───┤      └───────────┬─────────────┘
- ├────────────────┤                 │                  │ pop(timeout)
- │ Net workers ×2 │──Stt/Llm/Err────┘                  ▼
- └────────────────┘                          ┌───────────────────────┐
-                                             │ Main thread           │
-                                             │  loop:                │
-                                             │   ev = bus.pop(10ms)  │
-                                             │   if ev: fsm.handle() │
-                                             │   lv_timer_handler()  │
-                                             └───────────────────────┘
+```mermaid
+flowchart LR
+    subgraph producers["Producers (push)"]
+        GPIO["GPIO thread"]
+        Cap["Capture thread"]
+        Play["Playback thread"]
+        Net["Net workers ×2"]
+    end
+    Bus(["EventBus<br/>(mutex + cv)"])
+    subgraph consumer["Consumer (main thread)"]
+        Main["loop:<br/>ev = bus.pop(10ms)<br/>if ev: fsm.handle(ev)<br/>lv_timer_handler()"]
+    end
+    GPIO -->|ButtonEvent| Bus
+    Cap -->|RecordingComplete / Timeout| Bus
+    Play -->|PlaybackComplete| Bus
+    Net -->|SttResult / LlmResult / NetworkError| Bus
+    Bus -->|pop timeout| Main
 ```
 
 **Invariants (enforce in code review — see Risk Register):**
@@ -156,19 +153,32 @@ A `std::variant` keeps the event set closed and lets the state machine `std::vis
 
 ## 4. End-to-end data flow (one PTT turn)
 
-```
-[GPIO] PTT press
-   └─► ButtonEvent{Ptt,Press}      ─► FSM: IDLE→LISTENING; AudioPipeline.start()
-[Capture] fills buffer until PTT release OR 15s (FR-8)
-[GPIO] PTT release
-   └─► ButtonEvent{Ptt,Release}    ─► FSM: LISTENING→PROCESSING
-[Capture] RecordingComplete{pcm}   ─► FSM hands pcm to net worker
-[Net]  SttClient.transcribe(pcm)
-   └─► SttResult{"what's the weather"} ─► FSM hands text to net worker
-[Net]  LlmClient.chat(text)
-   └─► LlmResult{"It's sunny..."}   ─► FSM: TtsEngine.synthesize() on main thread
-[Main] TtsEngine → PcmBuffer       ─► FSM: PROCESSING→SPEAKING; Playback.start(pcm)
-[Playback] PlaybackComplete        ─► FSM: SPEAKING→IDLE
+```mermaid
+sequenceDiagram
+    participant GPIO
+    participant FSM as StateMachine
+    participant Cap as Capture
+    participant Net
+    participant TTS as TtsEngine
+    participant Play as Playback
+
+    GPIO->>FSM: ButtonEvent{Ptt,Press}
+    Note over FSM: IDLE → LISTENING
+    FSM->>Cap: AudioPipeline.start()
+    Note over Cap: fill buffer until PTT release OR 15s (FR-8)
+    GPIO->>FSM: ButtonEvent{Ptt,Release}
+    Note over FSM: LISTENING → PROCESSING
+    Cap->>FSM: RecordingComplete{pcm}
+    FSM->>Net: SttClient.transcribe(pcm)
+    Net-->>FSM: SttResult{"what's the weather"}
+    FSM->>Net: LlmClient.chat(text)
+    Net-->>FSM: LlmResult{"It's sunny..."}
+    FSM->>TTS: synthesize(reply) [main thread]
+    TTS-->>FSM: PcmBuffer
+    Note over FSM: PROCESSING → SPEAKING
+    FSM->>Play: start(pcm)
+    Play-->>FSM: PlaybackComplete
+    Note over FSM: SPEAKING → IDLE
 ```
 
 Any `NetworkError` / `TtsFailed` along the way short-circuits to the `ERROR` state with a distinct LCD message (CLAUDE.md §9), then auto-recovers on the next PTT press.

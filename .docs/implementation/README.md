@@ -59,6 +59,7 @@ Mỗi guide có cấu trúc cố định:
 
 - **Contract/interface** → [../architecture.md](../architecture.md) §2
 - **Luật code** (RAII, Result<T>, ownership) → [../development/coding_guide.md](../development/coding_guide.md)
+- **Dựng & chạy test** (GoogleTest + CTest + sanitizer) → [../development/testing.md](../development/testing.md)
 - **Thiết kế tầng** → [../development/hal_layer.md](../development/hal_layer.md), [../development/app_layer.md](../development/app_layer.md)
 - **Tư duy mức Phase** → [../knowledge/strategy_roadmap.md](../knowledge/strategy_roadmap.md)
 - **Nền tảng lý thuyết** → [../knowledge/](../knowledge/README.md)

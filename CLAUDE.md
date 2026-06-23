@@ -204,7 +204,7 @@ AI-Voice-Assistant/
 │   ├── server_setup.md               # PC AI server (LM Studio + faster-whisper) setup (EN)
 │   ├── timeline.md                   # 4-week day-by-day plan (EN)
 │   ├── troubleshooting.md            # symptom→cause→fix by subsystem (EN)
-│   ├── development/                  # coding_guide / device_driver / hal_layer / app_layer (Vietnamese, see §18)
+│   ├── development/                  # coding_guide / testing / device_driver / hal_layer / app_layer (Vietnamese, see §18)
 │   ├── implementation/               # per-component build guides, numbered 00..11 + README (Vietnamese, see §18)
 │   └── knowledge/                    # strategy_roadmap / threading / audio_alsa / cross_compile / ai_server + README (Vietnamese, see §18)
 │
@@ -372,6 +372,7 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 | [.docs/timeline.md](.docs/timeline.md) | 4-week plan with daily tasks | EN |
 | [.docs/troubleshooting.md](.docs/troubleshooting.md) | Common issues and solutions, by subsystem | EN |
 | [.docs/development/coding_guide.md](.docs/development/coding_guide.md) | C++17 patterns, error handling, design patterns, logging, conventions | VI |
+| [.docs/development/testing.md](.docs/development/testing.md) | Host unit-test setup (GoogleTest + CTest + sanitizers), test philosophy | VI |
 | [.docs/development/device_driver.md](.docs/development/device_driver.md) | SPI, Device Tree overlay, fbtft binding for ILI9341 | VI |
 | [.docs/development/hal_layer.md](.docs/development/hal_layer.md) | HAL interface design, shared library, mock pattern | VI |
 | [.docs/development/app_layer.md](.docs/development/app_layer.md) | State machine, EventBus, LVGL UI, ButtonController | VI |

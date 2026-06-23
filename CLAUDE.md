@@ -367,6 +367,7 @@ Building natively on the BBB (single-core Cortex-A8 @ 1GHz, 512MB RAM) is slow a
 | [CLAUDE.md](CLAUDE.md) | Overview, requirements, architecture, decisions (this file) | EN |
 | [CHECK_LIST.md](CHECK_LIST.md) | Tracking current status | mixed |
 | [.docs/architecture.md](.docs/architecture.md) | Interface definitions, class sketches, thread model, **chosen display-driver path and why** | EN |
+| [.docs/hardware_setup.md](.docs/hardware_setup.md) | Physical wiring: full pin map, SPI0 LCD+touch topology, button circuits, LED, bring-up checklist | EN |
 | [.docs/env_setup.md](.docs/env_setup.md) | Setup environment, packages, dependencies, crosstool-ng toolchain | EN |
 | [.docs/server_setup.md](.docs/server_setup.md) | PC AI server setup: LM Studio + faster-whisper-server on Windows+NVIDIA, LAN exposure | EN |
 | [.docs/timeline.md](.docs/timeline.md) | 4-week plan with daily tasks | EN |

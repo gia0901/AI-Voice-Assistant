@@ -110,6 +110,29 @@ cmake --build build-tsan && ctest --test-dir build-tsan --output-on-failure
 
 > Mẹo: test đa luồng có thể "may rủi" pass. Chạy **dưới TSan** + **lặp nhiều lần** (`ctest --repeat until-fail:50`) mới đủ tin.
 
+### 5.1 False positive — libtsan GCC 11 + `std::condition_variable`
+
+**libtsan của GCC 11 (Ubuntu 22.04) báo nhầm** với code dùng `condition_variable::wait_for` (như `EventBus`): khi consumer `pop()` (condvar) chạy *đồng thời* producer `push()`, TSan in `WARNING: double lock of a mutex` + loạt "data race" trên `std::queue` nội bộ — dù code đúng. Đã sửa ở GCC ≥13 / clang.
+
+**Cách nhận diện một false positive** (kỹ năng quan trọng):
+1. **Double-lock thật của `std::mutex` (không đệ quy) phải TREO.** Nếu test vẫn `PASSED` → không có double-lock thật.
+2. **Cả hai phía "race" cùng giữ một mutex** (`mutexes: write M33` ở cả hai stack) → dữ liệu *đã* được bảo vệ → không thể là race thật.
+3. Test biến thể *không* có push‖pop đồng thời (join producer trước rồi mới drain) lại **sạch** → vấn đề nằm ở mô hình hoá condvar của TSan, không ở code.
+
+> **Đừng sửa code đúng để dập false positive.** Dùng **suppression file** thay vì đổi logic.
+
+Suppression: [tests/tsan.supp](../../tests/tsan.supp) (đã giải thích lý do từng dòng). Dùng:
+```bash
+TSAN_OPTIONS="suppressions=$PWD/tests/tsan.supp" ctest --test-dir build-tsan --output-on-failure
+```
+Wiring vĩnh viễn trong `tests/CMakeLists.txt` (thay dòng `gtest_discover_tests(eventbus_test)`):
+```cmake
+gtest_discover_tests(eventbus_test
+    PROPERTIES ENVIRONMENT
+    "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan.supp")
+```
+(`TSAN_OPTIONS` vô hại với build ASan, nên đặt không điều kiện cũng được.) Khi nâng lên GCC ≥13/clang, thử bỏ suppression xem còn cần không.
+
 ---
 
 ## 6. Ví dụ: test EventBus (khung — bạn điền)

@@ -1,0 +1,24 @@
+# ThreadSanitizer suppressions
+#
+# GCC 11 (Ubuntu 22.04) libtsan FALSE POSITIVES in EventBus concurrent push/pop.
+#
+# Root cause: libtsan-11 mismodels std::condition_variable::wait_for
+# (pthread_cond_timedwait), losing the happens-before edge provided by mutex_,
+# then reports a spurious "double lock of a mutex" at EventBus::push and a
+# cascade of races on the mutex-protected std::queue/deque.
+#
+# Proven FALSE (not a real bug — do NOT change EventBus):
+#   1. A real double-lock of a non-recursive std::mutex would DEADLOCK, but the
+#      test passes in ~4.6s.
+#   2. TSan lists BOTH racing accesses as holding the same mutex (M33); a real
+#      race needs at least one access without the common lock.
+#   3. The join-first test (no concurrent push+pop) is TSan-clean; only the
+#      condvar-in-pop concurrent case trips it.
+#
+# Re-verify (and ideally drop these) on GCC >= 13 or clang, where the condvar
+# modeling is fixed.
+
+mutex:bbb::EventBus::push
+deadlock:bbb::EventBus::push
+race:bbb::EventBus::push
+race:bbb::EventBus::pop

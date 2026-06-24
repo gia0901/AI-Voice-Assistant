@@ -29,6 +29,9 @@ endif()
 add_executable(eventbus_test common/EventBusTest.cpp)
 target_include_directories(eventbus_test PRIVATE ${CMAKE_SOURCE_DIR}/../common)
 target_link_libraries(eventbus_test PRIVATE GTest::gtest_main)
-gtest_discover_tests(eventbus_test)
+gtest_discover_tests(eventbus_test
+    PROPERTIES ENVIRONMENT
+    "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan.supp")
+
 
 # --- Next component ---

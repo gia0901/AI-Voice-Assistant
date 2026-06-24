@@ -1,6 +1,6 @@
 #include "IGpioHal.hpp"
 #include "Types.hpp"
-
+#include "Logger.hpp"
 #include <iostream>
 #include <string>
 

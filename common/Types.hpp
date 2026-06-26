@@ -28,7 +28,7 @@ struct GpioLineSpec { // gpio essential configurations
 
 struct GpioPinMap {
     GpioLineSpec ptt, volUp, volDown, led;
-    int debounceMs = 25;
+    int debounceMs;
 };
 
 

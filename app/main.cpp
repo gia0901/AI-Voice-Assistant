@@ -6,8 +6,8 @@
 
 
 int main(int argc, char** argv) {
-    std::cout << "Hello World from Beaglebone Black!" << std::endl;
-
+    bbb::Logger::init("debug");
+    bbb::Logger::debug("Hello from {}", std::string("Beaglebone Black"));
 
     return 0;
 }

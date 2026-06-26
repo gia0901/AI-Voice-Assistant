@@ -4,6 +4,9 @@ project(bbb_voice_assistant LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Sinh build/compile_commands.json để IntelliSense/clangd biết đúng cờ biên dịch
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 #### Packages ####
 # spdlog
 include(FetchContent)

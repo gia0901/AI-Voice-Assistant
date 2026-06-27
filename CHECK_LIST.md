@@ -6,20 +6,29 @@
 
 ### 1. Bring-up
 - [x] USB-To-Ethernet và SSH hoạt động được
-- [x] Bringup ILI9341
+- [x] ILI9341 hoạt động được
 - [x] USB-Audio hoạt động được (Loa + Mic)
 
 ### 2. Development environment setup
 - [x] Setup cross-compile (cross-tool ng)
-    - [x] Hello World! trên BBB với C++
-    - [ ] CMake và Makefile compile
+    - [x] CMake compiled
 
-- [ ] Xử lý thư viện, package, dependency
+- [x] Xử lý thư viện, package, dependency
     - [ ] LVGL
-    - [ ] Alsa
+    - [x] Alsa
+    - [x] json
+    - [x] spdlog
 
 ### 3. Kickstart!
-- [ ] Chuẩn bị base structure
-- [ ] Chuẩn bị test code nhanh hardware (nằm trong base structure)
-- [ ] Các thành phần cơ bản phải compile được
+- [x] Chuẩn bị base structure
+- [x] Các thành phần cơ bản phải compile được
+- [x] Hello World! Beaglebone Black
 
+### 4. Development
+- [ ] common
+- [ ] GPIO
+    - [ ] Device tree update
+    - [ ] Quick test
+- [ ] Display
+    - [ ] Device tree Touch screen update
+- [ ] Audio 

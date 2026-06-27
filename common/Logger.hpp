@@ -42,6 +42,11 @@ struct Logger {
     }
 
     template<typename... Args>
+    static void warn(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+        spdlog::warn(fmt, std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
     static void error(spdlog::format_string_t<Args...> fmt, Args&&... args) {
         spdlog::error(fmt, std::forward<Args>(args)...);
     }

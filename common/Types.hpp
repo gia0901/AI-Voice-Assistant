@@ -9,7 +9,7 @@ namespace bbb {
 enum class State { Init, Idle, Listening, Processing, Speaking, Error };
 enum class Service { Stt, Llm }; // Network Service (STT or LLM server)
 
-struct Error { int code; std::string msg; };
+struct Error { int code = EXIT_FAILURE; std::string msg = ""; };
 template<typename T> using Result = std::variant<T, Error>;
 
 // --------- Audio ---------

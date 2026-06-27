@@ -49,6 +49,13 @@ namespace bbb {
   }
 }
 **/
+/**
+* @brief  Các biến và hàm ở đây đều nằm trên header.
+*         Để tránh lỗi multiple definition, ta dùng inline để cho phép
+*         nhiều source .cpp có thể include và sử dụng đồng thời.
+*/
+
+
 // -------- DEFAULT definitions ---------
 // Network
 inline constexpr int kNetConnectMs = 3000;
@@ -66,11 +73,18 @@ inline constexpr int kDisplayWidth = 320;
 inline constexpr int kDisplayHeight = 240;
 inline constexpr int kDisplayRotation = 0;
 
+// Error code
+enum class ConfigError : int{
+    NotFound = 1, // tránh bắt đầu từ 0 (SUCCESS code)
+    ParseError,
+};
+
 struct LlmConfig { std::string host, path, model; int port = 0; };
 struct SttConfig { std::string host, path, model, lang; int port = 0; };
 struct NetConfig { int connectMs = kNetConnectMs, totalMs = kNetTotalMs; };
 struct AudioConfig { std::string captureDevice, playbackDevice; 
-                    int sampleRate = kAudioSampleRate, channels = kAudioChannels, maxRecordSec = kAudioMaxRecordSec;
+                    int sampleRate = kAudioSampleRate, channels = kAudioChannels; // fixed by NFR-4, not from config
+                    int  maxRecordSec = kAudioMaxRecordSec; // configurable
                     float initialGain = kAudioInitialGain, gainStep = kAudioGainStep; };
 struct DisplayConfig { std::string fbdev; int width = kDisplayWidth, height = kDisplayHeight, rotation = kDisplayRotation; };
 
@@ -88,7 +102,7 @@ inline Result<AppConfig> loadConfig(const std::string& path) {
     AppConfig config;    
 
     if (!f)
-        return Error{1, "config not found: " + path};
+        return Error{static_cast<int>(ConfigError::NotFound), "config not found: " + path};
 
     try {
         nlohmann::json j;
@@ -124,11 +138,23 @@ inline Result<AppConfig> loadConfig(const std::string& path) {
         config.gpio.volDown = parseLine(g.at("volDown"));
         config.gpio.led     = parseLine(g.at("led"));
 
+        const auto& audio = j.at("audio");
+        config.audio.captureDevice = audio.at("captureDevice");
+        config.audio.playbackDevice = audio.at("playbackDevice");
+        config.audio.maxRecordSec = audio.value("maxRecordSec", kAudioMaxRecordSec);
+        config.audio.initialGain = audio.value("initialGain", kAudioInitialGain);
+        config.audio.gainStep = audio.value("gainStep", kAudioGainStep);
+        
+        const auto& display = j.at("display");
+        config.display.fbdev = display.at("fbdev");
+        config.display.width = display.at("width");
+        config.display.height = display.at("height");
+        config.display.rotation = display.value("rotation", kDisplayRotation);
+        
     } catch (const std::exception& e) {
-        return Error{1, std::string("invalid config: ") + e.what()};
+        return Error{static_cast<int>(ConfigError::ParseError), std::string("invalid config: ") + e.what()};
     }
 
     return config;
 }
-
 } // namespace bbb

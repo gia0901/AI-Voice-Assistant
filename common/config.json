@@ -1,0 +1,42 @@
+{
+  "llm": {
+    "host": "192.168.1.50",
+    "port": 9000,
+    "path": "/v1/chat/completions",
+    "model": "qwen2.5-3b-instruct"
+  },
+  "stt": {
+    "host": "192.168.1.50",
+    "port": 10000,
+    "path": "/inference",
+    "model": "ggml-base.en",
+    "lang": "en"
+  },
+  "network": {
+    "connectMs": 3000,
+    "totalMs": 10000
+  },
+
+  "gpio": {
+    "debounceMs": 25,
+    "ptt":     { "chip": 1, "offset": 0, "activeLow": true },
+    "volUp":   { "chip": 1, "offset": 0, "activeLow": true },
+    "volDown": { "chip": 1, "offset": 0, "activeLow": true },
+    "led":     { "chip": 1, "offset": 0, "activeLow": false }
+  },
+
+  "audio": {
+    "captureDevice":  "plughw:CARD=Device,DEV=0",
+    "playbackDevice": "plughw:CARD=Device,DEV=0",
+    "maxRecordSec": 15,
+    "initialGain": 1.0,
+    "gainStep": 0.1
+  },
+
+  "display": {
+    "fbdev": "/dev/fb0",
+    "width": 320,
+    "height": 240,
+    "rotation": 0
+  }
+}

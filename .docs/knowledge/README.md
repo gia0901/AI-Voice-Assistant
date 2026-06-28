@@ -11,6 +11,7 @@
 | [audio_alsa.md](audio_alsa.md) | PCM, sample rate/bit depth, ALSA `hw`/`plughw`, period/buffer, xrun, software gain |
 | [cross_compile.md](cross_compile.md) | Host vs target, toolchain ABI hardfloat, sysroot, vì sao crosstool-ng |
 | [ai_server.md](ai_server.md) | PC server: vì sao 2 server tách (STT+LLM), Whisper/ASR, GGUF/quantization, chọn model theo VRAM, ngân sách độ trễ. Thao tác: [../server_setup.md](../server_setup.md) |
+| [touch_screen.md](touch_screen.md) | Touch điện trở & XPT2046: nguyên lý đo điện áp, ADC/PENIRQ, driver `ads7846`, giải nghĩa từng setting node `touch@1`, calibration & raw-vs-pixel |
 
 ## Sẽ bổ sung khi gặp (gợi ý)
 

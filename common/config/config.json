@@ -1,12 +1,13 @@
 {
   "llm": {
     "host": "192.168.1.50",
+    "port": 9000,
     "path": "/v1/chat/completions",
     "model": "qwen2.5-3b-instruct"
   },
   "stt": {
     "host": "192.168.1.50",
-    "port": 9000,
+    "port": 10000,
     "path": "/inference",
     "model": "ggml-base.en",
     "lang": "en"

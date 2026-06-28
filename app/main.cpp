@@ -19,8 +19,11 @@ int main() {
     auto config = loadAppConfig(config_path);
     if (std::holds_alternative<Error>(config)) {
         const auto& err = std::get<Error>(config);
-        Logger::error("(Error code:{}) {}", err.code, err.msg);
+        Logger::error("[code:{}] {}", err.code, err.msg);
         return EXIT_FAILURE;
+    }
+    else {
+        Logger::info("Load config successfully!");
     }
 
     // get config và sử dụng (TBD)

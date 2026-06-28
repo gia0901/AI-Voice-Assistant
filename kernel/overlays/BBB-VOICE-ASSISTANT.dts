@@ -23,6 +23,34 @@
                     0x044 0x0f   /* P9_23 gpmc_a1.gpio1_17 (DC),    OUTPUT | PULLDIS | MODE7 */
                 >;
             };
+
+            bb_touch_pins: pinmux_bb_touch_pins {
+                pinctrl-single,pins = <
+                    0x090 0x0f   /* P8_07 gpio2[2](T_CS),   OUTPUT | PULLDIS | MODE7 */
+                    0x094 0x37   /* P8_08 gpio2[3](T_IRQ),  INPUT_PULLUP  | MODE7 */
+                >;
+            };
+
+            push_to_talk_pin: pinmux_push_to_talk_pin {
+                pinctrl-single,pins = <
+                    0x09c 0x37   /* P8_09 gpio2[5](PTT),    INPUT_PULLUP | MODE7 */
+                >;
+            };
+
+            volume_pins: pinmux_volume_pins {
+                pinctrl-single,pins = <
+                    0x098 0x37   /* P8_10 gpio2[4](vol+),   INPUT_PULLUP | MODE7 */
+                    0x034 0x37   /* P8_11 gpio1[13](vol-),  INPUT_PULLUP | MODE7 */
+                >;
+            };
+
+            rgb_led_pins: pinmux_rgb_led_pins {
+                pinctrl-single,pins = <
+                    0x028 0x0f   /* P8_14 gpio0[26](Red),   OUTPUT | PULLDIS | MODE7 */
+                    0x03c 0x0f   /* P8_15 gpio1[15](Green), OUTPUT | PULLDIS | MODE7 */
+                    0x038 0x0f   /* P8_16 gpio1[14](Blue),  OUTPUT | PULLDIS | MODE7 */
+                >;
+            };
         };
     };
 
@@ -33,9 +61,13 @@
             #address-cells = <1>;
             #size-cells = <0>;
             ti,pindir-d0-out-d1-in = <1>;
+            cs-gpios = <0 &gpio2 2 1>; /* GPIO_ACTIVE_LOW */
             status = "okay";
             pinctrl-names = "default";
-            pinctrl-0 = <&bb_ili9341_spi0_pins>;
+            pinctrl-0 = <
+                &bb_ili9341_spi0_pins &bb_touch_pins
+                &push_to_talk_pin &volume_pins &rgb_led_pins /* not meaningful way, but to achieve libgpiod method */
+            >;
 
             ili9341_lcd: display@0 {
                 compatible = "ilitek,ili9341", "adafruit,yx240qv29","multi-inno,mi0283qt";
@@ -44,9 +76,39 @@
                 pinctrl-names = "default";
                 pinctrl-0 = <&bb_ili9341_ctrl_pins>;
                 spi-max-frequency = <32000000>;
-                rotate = <0>;
+                rotate = <180>;
                 dc-gpios    = <&gpio1 17 0>;   /* active-high select line */
                 reset-gpios = <&gpio1 16 1>;   /* active-low reset */
+            };
+
+            lcd_touch: touch@1 {
+                compatible = "ti,tsc2046";
+                reg = <1>;
+                spi-max-frequency = <2000000>;
+                interrupt-parent = <&gpio2>;
+                interrupts = <3 2>; /* (IRQ_TYPE_EDGE_FALLING - PENIRQ on gpio2[3]) */
+                pendown-gpio = <&gpio2 3 1>; /* GPIO_ACTIVE_LOW */
+                /* ads7846 tuning — all values are u16, hence /bits/ 16 (32-bit cells are misread) */
+
+                /* X-plate resistance (ohms). Used to compute touch pressure Rt; also sets
+                 * sensitivity. ~600 is typical for XPT2046 panels — tune per module. */
+                ti,x-plate-ohms      = /bits/ 16 <600>;
+                /* Max accepted pressure. Samples with Rt above this are dropped as a light/
+                 * spurious touch, so a finger press registers but noise does not. */
+                ti,pressure-max      = /bits/ 16 <255>;
+                /* Debounce: take up to <max> samples per point... */
+                ti,debounce-max      = /bits/ 16 <10>;
+                /* ...reject the point if consecutive samples differ by more than <tol>... */
+                ti,debounce-tol      = /bits/ 16 <30>;
+                /* ...and require <rep> consistent reads before reporting it. */
+                ti,debounce-rep      = /bits/ 16 <1>;
+                /* Settle time after switching the ADC mux channel before sampling. Critical:
+                 * without it the analog line hasn't settled and X/Y come back as garbage/0. */
+                ti,settle-delay-usec = /bits/ 16 <150>;
+                /* Keep the internal Vref on between conversions → steadier pressure readings. */
+                ti,keep-vref-on;
+                /* Allow a touch to wake the system from suspend. */
+                wakeup-source;
             };
         };
     };

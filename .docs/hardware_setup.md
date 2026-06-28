@@ -19,7 +19,7 @@
 | 3 | Push button — PTT | 1 GPIO (input, pull-up) | ✅ | libgpiod edge + debounce |
 | 4 | Push button — Vol+ | 1 GPIO (input, pull-up) | ✅ | libgpiod |
 | 5 | Push button — Vol− | 1 GPIO (input, pull-up) | ✅ | libgpiod |
-| 6 | Status LED | on-board USR LED(s) | ✅ | No header pin used — see §7 |
+| 6 | Status LED — HW-479 RGB (common-cathode, on-board resistors) | 3 GPIO (output) | ✅ | libgpiod, on/off color states — see §7 |
 | 7 | USB audio adapter | USB host | ✅ | Mic in + speaker out (ALSA) |
 
 All logic is **3.3 V**. The BBB is **not 5 V tolerant** on GPIO — never feed 5 V into a pin.
@@ -173,27 +173,49 @@ The **display node and its pins stay unchanged** — adding touch is purely addi
 
 ---
 
-## 7. Status LED (FR-7)
+## 7. Status LED (FR-7) — HW-479 RGB module
 
-Use the **on-board USR LEDs** (USR0–USR3 = gpio1[21..24]) instead of an external LED — no header
-pin consumed. They expose `/sys/class/leds/beaglebone:green:usr*` with triggers. Suggested mapping:
+**Chosen:** HW-479 RGB LED module — **common-cathode**, with **3 on-board current-limiting
+resistors** (R/G/B), 4 pins (R, G, B, GND). Driven straight from 3 GPIO (no external resistor).
+GPIO **High = color on** (`GPIO_ACTIVE_HIGH` — opposite polarity to the active-low buttons/PENIRQ).
 
-| State | Pattern |
-|-------|---------|
-| IDLE | heartbeat / off |
-| LISTENING | solid on |
-| PROCESSING | blink |
-| ERROR | fast blink |
+| Module pin | BBB pin | Signal (mode0) | GPIO line | Mux offset | Cfg byte | libgpiod |
+|------------|---------|----------------|-----------|------------|----------|----------|
+| R   | P8_14 | gpmc_ad10 | gpio0[26] | 0x028 | 0x0f (OUT, MODE7) | gpiochip0 line 26 |
+| G   | P8_15 | gpmc_ad15 | gpio1[15] | 0x03c | 0x0f (OUT, MODE7) | gpiochip1 line 15 |
+| B   | P8_16 | gpmc_ad14 | gpio1[14] | 0x038 | 0x0f (OUT, MODE7) | gpiochip1 line 14 |
+| GND | P8_01 | DGND | — | — | — | — |
 
-An external LED on a spare P8 pin (e.g. P8_12 gpio1[12], `0x030`) + series resistor (~330 Ω) is a
-future option if a dedicated indicator is wanted.
+```
+  HW-479 (common cathode, on-board resistors)
+    R  ──► P8_14 gpio0[26]  ┐
+    G  ──► P8_15 gpio1[15]  ├─ drive High = lit
+    B  ──► P8_16 gpio1[14]  ┘
+    GND ─► P8_01
+```
+
+| State | Color | Pins High |
+|-------|-------|-----------|
+| IDLE | green | G |
+| LISTENING | blue | B |
+| PROCESSING | yellow | R + G |
+| ERROR | red | R |
+
+- On/off color states only → **plain libgpiod (same `GpioHAL` as the buttons), no PWM needed.**
+- Blue/green run slightly dim at 3.3 V (resistors sized for 5 V) — acceptable for an indicator.
+- **DT note:** the 3 pads must be muxed MODE7. For libgpiod the kernel must *not* claim them
+  (no `gpio-leds` node). Alternative: a `gpio-leds` node gives `/sys/class/leds` triggers but the
+  kernel owns the pins — pick one model, not both.
+
+> Fallback: the **on-board USR LEDs** (USR0–USR3 = gpio1[21..24], `/sys/class/leds/beaglebone:green:usr*`)
+> cost zero header pins but are single-color/blink-only — fine if the RGB module is dropped.
 
 ---
 
 ## 8. Free pins remaining (for future expansion)
 
-Clean GPIOs still unused (not eMMC, not HDMI): P8_12, P8_13, P8_14, P8_15, P8_16, P8_17, P8_18,
-P8_19, P8_26. Plenty of headroom if more controls are added later.
+Clean GPIOs still unused (not eMMC, not HDMI): P8_12, P8_13, P8_17, P8_18, P8_19, P8_26.
+P8_13/P8_19 are EHRPWM2-capable — keep for backlight/LED PWM if dimming is ever wanted.
 
 ---
 

@@ -2,6 +2,8 @@
 
 > Implementation guide (tiếng Việt, Rule §18). Template 7 mục — [README.md](README.md). *Giàn giáo + gợi ý, không phải lời giải.*
 >
+> **Phong cách mục 5:** mỗi hàm theo 3 lớp — **Bản chất** (bài toán & hướng giải) → **API toolbox** (tra cứu cục bộ) → **Pseudo** (chừa quyết định khó ở `TODO(you)`).
+>
 > Nền: [../knowledge/audio_alsa.md](../knowledge/audio_alsa.md) (đọc trước — period/xrun/plughw) · [../development/hal_layer.md](../development/hal_layer.md)
 
 ---
@@ -34,7 +36,7 @@ public:
     virtual void setVolume(float gain) = 0;     // 0.0–1.0, nhân trước khi ghi
 };
 ```
-**Ràng buộc:** đọc/ghi **theo từng period** (để AudioPipeline kiểm cờ dừng + FR-8 — guide 04); blocking; lỗi trả mã; RAII đóng `snd_pcm_t` ở dtor.
+**Ràng buộc:** đọc/ghi **theo từng period** (để AudioPipeline kiểm cờ dừng + FR-8 — [04](04-audio-pipeline.md)); blocking; lỗi trả mã; RAII đóng `snd_pcm_t` ở dtor.
 
 ---
 
@@ -78,13 +80,14 @@ public:
 
 ## 5. 🧩 Khung code tự điền
 
-### 5.1 `AlsaAudioHal.hpp` — *skeleton*
+### 5.1 `hal/audio/AlsaAudioHal.hpp` — *skeleton*
 ```cpp
 #pragma once
 #include "IAudioHal.hpp"
 #include <alsa/asoundlib.h>
 #include <atomic>
-namespace bbb::hal {
+#include <vector>
+namespace bbb {
 class AlsaAudioHal : public IAudioHal {
 public:
     explicit AlsaAudioHal(std::string device) : device_(std::move(device)) {}
@@ -100,41 +103,103 @@ public:
     void setVolume(float g) override { gain_ = g; }    // atomic
 private:
     std::string device_;
-    snd_pcm_t* cap_ = nullptr;
+    snd_pcm_t* cap_  = nullptr;
     snd_pcm_t* play_ = nullptr;
     std::atomic<float> gain_{1.0f};
+    std::vector<int16_t> gainBuf_;   // TODO(you): reserve sẵn, tránh malloc mỗi period
     // helper: setHwParams(pcm, fmt) dùng chung cho cả 2 stream
 };
-} // namespace bbb::hal
+} // namespace bbb
 ```
 
-### 5.2 Thuật toán `setHwParams` (dùng chung)
-```
-snd_pcm_hw_params_alloca(&hp)
-snd_pcm_hw_params_any(pcm, hp)
-set_access(INTERLEAVED); set_format(S16_LE); set_channels(1)
-set_rate_near(16000); set_period_size_near(period)
-snd_pcm_hw_params(pcm, hp)        // commit
-nếu bất kỳ bước lỗi → trả mã <0
-```
-> TODO(you): kiểm rate thực tế trả về có đúng 16000 không (rate_near có thể lệch) — log cảnh báo nếu lệch.
+---
 
-### 5.3 Thuật toán `readPeriod` / `writePeriod`
-```
-read:  n = snd_pcm_readi(cap_, dst, frames)
-       nếu n == -EPIPE → snd_pcm_prepare(cap_); return 0   // overrun, bỏ period này
-       nếu n <  0      → log; return n
-       return n
+### 5.2 `open*()` + `setHwParams()` (cấu hình stream)
 
-write: áp gain: for i: src2[i] = clamp(src[i] * gain_)
-       n = snd_pcm_writei(play_, src2, frames)
-       nếu n == -EPIPE → snd_pcm_prepare(play_); return 0   // underrun
-       return n
-```
-> TODO(you): buffer tạm cho gain — cấp phát ở đâu để khỏi malloc mỗi period? (gợi ý: member vector reserve sẵn). Đây là chỗ Claude soi hiệu năng.
+**Bản chất.** Mở một PCM device là **đàm phán cấu hình với driver**: bạn *đề nghị* (rate/format/channels/period), driver trả về *cái gần nhất nó làm được*. Mấu chốt là `*_near`: bạn xin 16000 nhưng có thể nhận 16001 → phải **đọc lại giá trị thực** và quyết có chấp nhận không. `openCapture`/`openPlayback` chỉ khác nhau ở hướng stream; phần config dùng chung một helper → DRY.
 
-### 5.4 `MockAudioHal.hpp` — *harness, gần đủ*
+**API toolbox** (libasound):
+
+| Hàm | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `snd_pcm_open(&pcm, device, STREAM_CAPTURE/PLAYBACK, 0)` | Mở device theo hướng | tên device từ config (Q4), không hardcode |
+| `snd_pcm_hw_params_alloca(&hp)` | Cấp vùng tham số trên stack | macro alloca — không tự free, đừng dùng ngoài scope |
+| `snd_pcm_hw_params_any(pcm, hp)` | Nạp cấu hình khả dĩ đầy đủ | gọi trước khi set gì |
+| `..._set_access(.,.,INTERLEAVED)` / `..._set_format(.,.,S16_LE)` / `..._set_channels(.,.,1)` | Đặt access/format/kênh | mono = 1 |
+| `..._set_rate_near` / `..._set_period_size_near` | Đặt rate/period "gần nhất" | trả giá trị *thực* qua tham chiếu — phải kiểm |
+| `snd_pcm_hw_params(pcm, hp)` | **Commit** cấu hình | trước bước này chưa có gì hiệu lực |
+
+**Pseudo:**
+```
+openX:  snd_pcm_open(&X_, device_, STREAM_X, 0);  lỗi → return <0
+        setHwParams(X_, fmt);  lỗi → đóng X_; return <0;  return 0
+
+setHwParams(pcm, fmt):
+        hw_params_alloca(&hp); hw_params_any(pcm, hp)
+        set_access(INTERLEAVED); set_format(S16_LE); set_channels(fmt.channels)
+        set_rate_near(fmt.rate); set_period_size_near(period)
+        hw_params(pcm, hp)                         // commit
+        đọc lại rate thực → nếu lệch nhiều, log cảnh báo
+        bất kỳ bước lỗi → return <0
+```
+> **TODO(you):** kiểm rate thực trả về có đúng 16000 không (`rate_near` có thể lệch); quyết ngưỡng "lệch bao nhiêu thì từ chối".
+
+---
+
+### 5.3 `readPeriod()` / `writePeriod()`
+
+**Bản chất.** I/O audio chạy theo **nhịp period**: mỗi lời gọi xử lý đúng một period rồi trả về — để tầng trên (AudioPipeline) còn chen vào kiểm cờ dừng / timeout FR-8. Sự cố thường gặp là **xrun** (overrun khi đọc, underrun khi ghi): buffer phần cứng cạn/tràn vì CPU không kịp → ALSA trả `-EPIPE`, stream vào trạng thái lỗi và **phải `prepare` lại** mới chạy tiếp. Coi xrun là *bình thường, hồi phục được*, không phải lỗi chết. Gain áp **ngay trước khi ghi**, vào buffer tạm cấp phát sẵn (không malloc mỗi period).
+
+**API toolbox** (libasound):
+
+| Hàm | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `snd_pcm_readi(pcm, dst, frames)` | Đọc interleaved, trả #frames | `-EPIPE` = overrun |
+| `snd_pcm_writei(pcm, src, frames)` | Ghi interleaved, trả #frames | `-EPIPE` = underrun |
+| `snd_pcm_prepare(pcm)` | Đưa stream lỗi về sẵn sàng | bắt buộc sau `-EPIPE` để chạy tiếp |
+
+**Pseudo:**
+```
+read:   n = snd_pcm_readi(cap_, dst, frames)
+        n == -EPIPE → snd_pcm_prepare(cap_); return 0     // overrun: bỏ period này
+        n <  0      → log; return n
+        return n
+
+write:  for i: gainBuf_[i] = clamp(src[i] * gain_, INT16_MIN, INT16_MAX)
+        n = snd_pcm_writei(play_, gainBuf_.data(), frames)
+        n == -EPIPE → snd_pcm_prepare(play_); return 0     // underrun
+        return n
+```
+> **TODO(you):** `gainBuf_` reserve ở đâu để khỏi malloc mỗi period? (gợi ý: resize 1 lần theo period trong `openPlayback`). Sau `-EPIPE` trả 0: tầng trên hiểu "không có dữ liệu lần này" có đúng không? Đây là chỗ Claude soi hiệu năng + đồng bộ.
+
+---
+
+### 5.4 `drain()` / `closePlayback()` / `closeCapture()` / `setVolume()`
+
+**Bản chất.** Kết thúc playback có **hai ngữ nghĩa khác nhau**: `drain` = phát nốt buffer rồi mới dừng (đúng khi TTS nói xong tự nhiên); `drop` = cắt ngay (đúng khi PTT interrupt SPEAKING). Chọn nhầm = âm thanh bị cụt hoặc trễ. `setVolume` chỉ lưu gain (atomic) — nó là dữ liệu, không phải lời gọi ALSA.
+
+**API toolbox** (libasound):
+
+| Hàm | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `snd_pcm_drain(pcm)` | Chờ phát hết buffer rồi dừng | blocking tới khi hết |
+| `snd_pcm_drop(pcm)` | Vứt buffer, dừng ngay | dùng cho interrupt |
+| `snd_pcm_close(pcm)` | Đóng & giải phóng handle | guard `NULL`; gán lại `nullptr` sau khi đóng |
+
+**Pseudo:** `drain` → `snd_pcm_drain(play_)`. `closeX` → nếu `X_` khác null: `snd_pcm_close(X_); X_ = nullptr`. `setVolume` → `gain_ = clamp(g, 0, max)`.
+> **TODO(you):** interrupt SPEAKING ([08](08-state-machine.md)) dùng `drain` hay `drop`? Khớp với hành vi state machine mong đợi.
+
+---
+
+### 5.5 `~AlsaAudioHal()`
+**Bản chất.** RAII đối xứng: đóng cả hai stream nếu còn mở. An toàn `NULL`.
+**Pseudo:** gọi `closeCapture()` + `closePlayback()` (đã guard null) trong dtor.
+
+---
+
+### 5.6 `tests/hal/MockAudioHal.hpp` — *harness, gần đủ*
 ```cpp
+namespace bbb {
 class MockAudioHal : public IAudioHal {
 public:
     std::vector<int16_t> fakeCapture, playbackSink;
@@ -153,7 +218,9 @@ public:
     void drain() override {} void closePlayback() override {}
     void setVolume(float g) override { lastGain = g; }
 };
+} // namespace bbb
 ```
+> Test gợi ý: nạp `fakeCapture` → assert pipeline đọc đủ; ghi qua gain → assert `playbackSink` bị scale đúng.
 
 ---
 
@@ -164,7 +231,7 @@ public:
 - **Quên xử lý `-EPIPE`** → app chết khi xrun đầu tiên. Phải `snd_pcm_prepare` recover.
 - **malloc buffer gain mỗi period** → giật. Reserve sẵn.
 - **Hardcode `hw:1`** → reboot đổi index. Dùng `CARD=` name.
-- **`drain` vs `drop`** → `drain` phát hết buffer rồi mới dừng (đúng cho playback xong); `drop` cắt ngay (đúng cho interrupt SPEAKING).
+- **`drain` vs `drop`** → `drain` phát hết rồi dừng (playback xong tự nhiên); `drop` cắt ngay (interrupt SPEAKING). Chọn nhầm = cụt tiếng hoặc trễ.
 
 ---
 

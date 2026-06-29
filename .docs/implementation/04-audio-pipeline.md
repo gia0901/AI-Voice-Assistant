@@ -2,6 +2,8 @@
 
 > Implementation guide (tiếng Việt, Rule §18). Template 7 mục — [README.md](README.md). *Giàn giáo + gợi ý.*
 >
+> **Phong cách mục 5:** mỗi hàm theo 3 lớp — **Bản chất** → **API toolbox** (tra cứu cục bộ) → **Pseudo** (chừa quyết định khó ở `TODO(you)`).
+>
 > Nền: [../development/app_layer.md](../development/app_layer.md) · [../knowledge/threading_eventbus.md](../knowledge/threading_eventbus.md) · FR-1/FR-8/NFR-4
 
 ---
@@ -11,7 +13,7 @@
 Middleware điều phối thu âm: chạy capture thread, dừng khi PTT nhả **hoặc** quá 15s (FR-8), gom buffer, đẩy `RecordingComplete`/`RecordingTimeout` lên bus; quản software gain (gọi xuống `IAudioHal`).
 
 **File:** `middleware/audio_pipeline/AudioPipeline.hpp/.cpp`.
-**Phụ thuộc:** `IAudioHal` (guide 02), `EventBus`+`Types` (guide 00).
+**Phụ thuộc:** `IAudioHal` ([02](02-audio-hal.md)), `EventBus`+`Types` ([00](00-common.md)).
 
 ---
 
@@ -81,7 +83,7 @@ public:
 namespace bbb {
 class AudioPipeline {
 public:
-    AudioPipeline(hal::IAudioHal* hal, EventBus& bus, int maxSeconds = 15)
+    AudioPipeline(IAudioHal* hal, EventBus& bus, int maxSeconds = 15)
         : hal_(hal), bus_(bus), maxFrames_(maxSeconds * 16000) {}
     ~AudioPipeline() { stop(); }
     void start();
@@ -89,8 +91,8 @@ public:
     void applyGain(float g) { hal_->setVolume(g); }
 private:
     void captureLoop();          // thân chạy trên thread
-    hal::IAudioHal* hal_;
-    EventBus& bus_;
+    IAudioHal* hal_;
+    EventBus&  bus_;
     size_t maxFrames_;
     std::thread th_;
     std::atomic<bool> running_{false};
@@ -98,35 +100,40 @@ private:
 } // namespace bbb
 ```
 
-### 5.2 Thuật toán `start` / `captureLoop` / `stop`
+---
+
+### 5.2 `start()` / `captureLoop()` / `stop()`
+
+**Bản chất.** Đây là một **worker thread có thể bị huỷ hợp tác (cooperative cancellation)**: thread không thể bị "giết" an toàn từ ngoài, nên nó tự nguyện kiểm một **cờ atomic** sau mỗi đơn vị công việc (period) rồi tự thoát. Có *hai đường* khiến thu dừng — PTT nhả (`stop()` từ main) và FR-8 timeout (chính thread tự quyết) — và đây là **trái tim vấn đề**: phải đảm bảo **đúng một** đường đẩy event lên bus, nếu không FSM nhận hai event và rối. FR-8 không cần timer: số frame đã đọc *là* đồng hồ (16000 frame = 1s).
+
+**API toolbox** (C++ std):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `std::atomic<bool> running_` | Cờ huỷ chia sẻ giữa main ↔ worker | đọc/ghi atomic, không cần mutex cho 1 cờ |
+| `std::thread(&Class::method, this)` | Spawn worker chạy `captureLoop` | object phải sống lâu hơn thread |
+| `th_.joinable()` / `th_.join()` | Kiểm & chờ thread kết thúc | join thread chưa start = crash → luôn check `joinable` |
+| `vector::reserve` / `insert(end,...)` | Gom buffer không realloc | reserve `maxFrames_` từ đầu |
+
+**Pseudo:**
 ```
-start():
-    nếu running_ → return            // tránh double start
-    hal_->openCapture({16000,1})
-    running_ = true
-    th_ = std::thread(&AudioPipeline::captureLoop, this)
+start():    nếu running_ → return;  hal_->openCapture({16000,1});  running_=true
+            th_ = std::thread(&AudioPipeline::captureLoop, this)
 
 captureLoop():
     PcmBuffer buf; buf.reserve(maxFrames_)
-    const size_t PERIOD = 1024
-    int16_t tmp[PERIOD]
     while running_:
         n = hal_->readPeriod(tmp, PERIOD)
-        nếu n > 0: buf.insert(end, tmp, tmp+n)
-        nếu buf.size() >= maxFrames_:       // FR-8
-            running_ = false
-            hal_->closeCapture()
-            bus_.push(RecordingTimeout{})
-            return
-    hal_->closeCapture()
-    bus_.push(RecordingComplete{ std::move(buf) })   // PTT-release path
+        n>0 → buf.insert(end, tmp, tmp+n)
+        nếu buf.size() >= maxFrames_:                 // FR-8: timeout path
+            running_=false; hal_->closeCapture(); bus_.push(RecordingTimeout{}); return
+    hal_->closeCapture(); bus_.push(RecordingComplete{ std::move(buf) })   // PTT-release path
 
-stop():
-    nếu !running_ → return
-    running_ = false
-    nếu th_.joinable(): th_.join()
+stop():     nếu !running_ → return;  running_=false;  nếu th_.joinable(): th_.join()
 ```
-> TODO(you): có race giữa `stop()` (main) set running_=false và captureLoop tự set false do timeout? Cả hai cùng push event được không? (gợi ý: chỉ một path được push — dùng một cờ "đã kết thúc" hoặc để stop() không push, timeout không cho stop() join nhầm. Đây là **chỗ khó nhất** — hỏi Claude.)
+> **TODO(you):** race giữa `stop()` (main set running_=false) và timeout (thread tự set + push). Cả hai có thể cùng push? (gợi ý: một cờ "đã kết thúc/đã push", hoặc thiết kế để *chỉ* thread đẩy event, `stop()` chỉ ra hiệu + join). **Đây là chỗ khó nhất** — đưa Claude review.
+
+---
 
 ### 5.3 Khung test
 ```cpp

@@ -2,6 +2,8 @@
 
 > Implementation guide (tiếng Việt, Rule §18). Template 7 mục — [README.md](README.md). *Giàn giáo + gợi ý.*
 >
+> **Phong cách mục 5:** mỗi hàm theo 3 lớp — **Bản chất** → **API toolbox** (tra cứu cục bộ) → **Pseudo** (chừa quyết định khó ở `TODO(you)`).
+>
 > Nền: CLAUDE.md §6 (Decision #5), §9 (eSpeak fail), §10 (spawn per utterance)
 
 ---
@@ -36,7 +38,7 @@ public:
 
 <details><summary><b>Q2.</b> eSpeak xuất sample rate nào? Có khớp playback 16k không?</summary>
 
-> eSpeak-ng mặc định xuất **22050 Hz** mono. Playback (guide 02) mở ở rate này, **hoặc** resample về 16k. Đơn giản nhất: mở một playback stream 22050 cho TTS (ALSA `plughw` lo phần còn lại). *Quyết định và lý giải.*
+> eSpeak-ng mặc định xuất **22050 Hz** mono. Playback ([02](02-audio-hal.md)) mở ở rate này, **hoặc** resample về 16k. Đơn giản nhất: mở một playback stream 22050 cho TTS (ALSA `plughw` lo phần còn lại). *Quyết định và lý giải.*
 </details>
 
 <details><summary><b>Q3.</b> Lấy PCM qua pipe stdout hay file tạm?</summary>
@@ -84,35 +86,46 @@ private:
 } // namespace bbb
 ```
 
-### 5.2 Thuật toán `synthesize` (pipe + fork/exec)
-```
-pipe(fd)                                   // fd[0] read, fd[1] write
-pid = fork()
-nếu pid == 0 (con):
-    dup2(fd[1], STDOUT); close fd[0],fd[1]
-    execlp("espeak-ng", "espeak-ng", "-v", voice, "-s", speed,
-           "--stdout", text, nullptr)
-    _exit(127)                             // exec fail
-cha:
-    close(fd[1])
-    đọc HẾT fd[0] vào std::vector<uint8_t> raw   // QUAN TRỌNG: đọc hết trước waitpid
-    close(fd[0])
-    waitpid(pid, &status)
-    nếu !WIFEXITED || WEXITSTATUS != 0 → return Error{...}
-    pcm = stripWavHeader(raw)              // hoặc parse header
-    return pcm
-```
-> TODO(you): viết `stripWavHeader` (hoặc parse 'data' chunk). Và xử lý đọc pipe theo vòng lặp `read()` tới EOF. **Thứ tự đọc-hết-rồi-wait** là chỗ Claude soi (deadlock pipe).
+---
 
-> Lưu ý an toàn: `text` đi thẳng vào exec — *không* qua shell (`system()`), nên không có injection. Đừng đổi sang `popen("espeak ... " + text)` (shell injection + khó kiểm lỗi).
+### 5.2 `synthesize()` (pipe + fork/exec)
+
+**Bản chất.** Đây là **chạy một process con và bắt output của nó** — mô hình Unix kinh điển `pipe → fork → exec`. Hai điểm sống còn: (1) **deadlock pipe** — pipe có dung lượng hữu hạn; nếu cha `waitpid` *trước* khi đọc hết, con sẽ block khi ghi đầy pipe còn cha block chờ con → kẹt cả hai. Luật: **đọc tới EOF rồi mới `waitpid`**. (2) **không để zombie** — process con kết thúc vẫn chiếm slot tới khi cha `waitpid` "reap". Bonus an toàn: truyền `text` làm **argv của exec**, không qua shell ⇒ miễn nhiễm injection (đừng đổi sang `popen`/`system` nối chuỗi).
+
+**API toolbox** (POSIX):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `pipe(fd)` | Tạo cặp fd: `fd[0]` đọc, `fd[1]` ghi | cha đóng đầu ghi, con đóng đầu đọc — đóng nhầm = treo |
+| `fork()` | Nhân đôi tiến trình | trả 0 ở con, pid ở cha, <0 lỗi |
+| `dup2(fd[1], STDOUT_FILENO)` | Chuyển stdout con vào pipe | làm ở **con**, trước exec |
+| `execlp("espeak-ng", "espeak-ng", ...args..., nullptr)` | Thay ảnh process con bằng eSpeak | chỉ trả về **khi lỗi** → sau đó `_exit(127)` |
+| `read(fd[0], buf, n)` lặp tới 0 | Đọc output tới EOF | **đọc hết trước** waitpid (chống deadlock) |
+| `waitpid(pid, &st, 0)` + `WIFEXITED`/`WEXITSTATUS` | Reap con + lấy exit code | exit≠0 → Error |
+
+**Pseudo:**
+```
+pipe(fd)
+pid = fork()
+con (pid==0):  dup2(fd[1], STDOUT); close fd[0]; close fd[1]
+               execlp("espeak-ng","espeak-ng","-v",voice,"-s",speed,"--stdout",text,nullptr)
+               _exit(127)                              // chỉ tới đây nếu exec fail
+cha:           close(fd[1])
+               vòng read(fd[0]) → nối vào raw tới EOF   // ĐỌC HẾT trước
+               close(fd[0]); waitpid(pid,&st,0)
+               !WIFEXITED(st) || WEXITSTATUS(st)!=0 → return Error{...}
+               return stripWavHeader(raw)               // hoặc parse 'data' chunk
+```
+> **TODO(you):** viết vòng `read()` tới EOF và `stripWavHeader` (bỏ 44 byte hoặc tìm chunk `data`). **Thứ tự đọc-hết-rồi-wait** là chỗ Claude soi (deadlock + zombie).
+
+---
 
 ### 5.3 Khung test
 ```cpp
-// Integration (cần espeak-ng): synthesize("hello") → PcmBuffer không rỗng, exit 0.
-// Unit: stripWavHeader(mẫu WAV) → đúng số mẫu PCM.
 TEST_CASE("stripWavHeader bỏ đúng 44 byte / tìm data chunk") {
-    // TODO(you)
+    // TODO(you): cho 1 mẫu WAV nhỏ → assert số mẫu PCM đúng
 }
+// Integration (cần espeak-ng): synthesize("hello") → PcmBuffer không rỗng, exit 0.
 ```
 
 ---

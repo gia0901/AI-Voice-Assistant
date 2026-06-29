@@ -1,29 +1,9 @@
 #pragma once
 
 #include "Types.hpp"
-
 #include <gpiod.h>
 
-enum class ButtonId {
-    Ptt,    // Push-to-talk
-    VolUp,
-    VolDown,
-};
-
-enum class Edge {
-    Press,
-    Release
-};
-
-struct GpioEvent {
-    ButtonId id;
-    Edge edge;
-};
-
-struct GpioPinMap {
-    std::string chipName; // Ex: gpiochip0
-    std::string lineName; // Ex: pin_16
-};
+namespace bbb {
 
 class IGpioHal {
 public:
@@ -36,3 +16,4 @@ public:
 private:
 
 };
+} // namespace bbb

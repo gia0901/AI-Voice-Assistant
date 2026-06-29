@@ -20,6 +20,11 @@ using PcmBuffer = std::vector<int16_t>; // S16_LE mono (signed 16 bit - little e
 enum class ButtonId { Ptt, VolUp, VolDown };
 enum class Edge { Press, Release };
 
+struct GpioEvent {
+    ButtonId id;
+    Edge edge;
+};
+
 struct GpioLineSpec { // gpio essential configurations
     int chip;
     int offset;

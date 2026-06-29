@@ -2,6 +2,8 @@
 
 > Implementation guide (tiếng Việt, Rule §18). Template 7 mục — xem [README.md](README.md). *Giàn giáo + gợi ý, không phải lời giải.*
 >
+> **Phong cách mục 5:** mỗi đơn vị theo 3 lớp — **Bản chất** (bài toán & hướng giải) → **API toolbox** (tra cứu cục bộ) → **Pseudo** (chừa quyết định khó ở `TODO(you)`).
+>
 > Nền: [../development/app_layer.md](../development/app_layer.md) §2 · [../knowledge/threading_eventbus.md](../knowledge/threading_eventbus.md) · [../development/coding_guide.md](../development/coding_guide.md)
 
 ---
@@ -117,88 +119,95 @@ struct TtsFailed         { std::string msg; };
 
 } // namespace bbb
 ```
-> TODO(you): thêm `AudioFormat`, `GpioPinMap` (từ 01), `LlmConfig/SttConfig` khi tới các guide sau. Giữ Types.hpp là *nơi duy nhất* khai báo các kiểu dùng chung.
+> TODO(you): thêm `AudioFormat`, `GpioLineSpec`/`GpioPinMap` (từ 01), `LlmConfig/SttConfig` khi tới các guide sau. Giữ Types.hpp là *nơi duy nhất* khai báo các kiểu dùng chung.
 
-### 5.2 `common/EventBus.hpp` — *skeleton; điền thân `pop`*
+---
+
+### 5.2 `common/EventBus.hpp`
+
+**Bản chất.** Đây là **producer–consumer một chiều**: nhiều thread *sản xuất* event, đúng một thread (main) *tiêu thụ*. Hai yêu cầu cốt lõi: (1) **đồng bộ** — bảo vệ hàng đợi bằng mutex để không hỏng dữ liệu; (2) **chờ có điều kiện** — consumer không được *busy-poll* hàng đợi (ngốn CPU), mà ngủ trên một condition variable tới khi có event *hoặc* hết timeout. Timeout là bắt buộc vì main loop còn phải nhịp `lv_timer_handler()`. Cạm bẫy kinh điển: **spurious wakeup** — cv có thể đánh thức vô cớ, nên *luôn* chờ kèm predicate.
+
+**API toolbox** (C++ std):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `std::mutex` + `std::lock_guard`/`std::unique_lock` | Khoá vùng truy cập hàng đợi | `wait_for` cần `unique_lock`, không phải `lock_guard` |
+| `std::condition_variable::wait_for(lk, dur, pred)` | Ngủ tới khi `pred()` true hoặc hết `dur` | **luôn dùng `pred`** để chống spurious wakeup; trả `false` nếu hết giờ mà pred vẫn false |
+| `std::condition_variable::notify_one()` | Đánh thức 1 consumer | nên gọi *sau* khi nhả lock để tránh đánh thức rồi lại chặn |
+| `std::queue<Event>` + `std::optional<Event>` | Hàng đợi + "có/không có" giá trị trả về | `front()` rồi `pop()`; nhớ `std::move(front)` |
+
+**Pseudo:**
 ```cpp
-#pragma once
-#include "Types.hpp"
-#include <queue>
-#include <mutex>
-#include <condition_variable>
-#include <optional>
-#include <chrono>
-
-namespace bbb {
-using Event = std::variant<
-    ButtonEvent, RecordingComplete, RecordingTimeout,
-    SttResult, LlmResult, NetworkError, PlaybackComplete, TtsFailed>;
-
-class EventBus {
-public:
-    void push(Event e) {
-        { std::lock_guard<std::mutex> lk(m_); q_.push(std::move(e)); }
-        cv_.notify_one();
-    }
-
-    std::optional<Event> pop(int timeoutMs) {
-        std::unique_lock<std::mutex> lk(m_);
-        // TODO(you): cv_.wait_for(lk, timeoutMs, predicate q_ không rỗng)
-        //            nếu hết timeout mà vẫn rỗng → return std::nullopt
-        //            ngược lại move front ra, pop, return nó
-        return std::nullopt;
-    }
-private:
-    std::queue<Event> q_;
-    std::mutex m_;
-    std::condition_variable cv_;
-};
-} // namespace bbb
+void push(Event e) {
+    { std::lock_guard lk(m_); q_.push(std::move(e)); }   // move, đừng copy PCM
+    cv_.notify_one();
+}
+std::optional<Event> pop(int timeoutMs) {
+    std::unique_lock lk(m_);
+    if (!cv_.wait_for(lk, ms(timeoutMs), [&]{ return !q_.empty(); })) return std::nullopt;
+    Event e = std::move(q_.front()); q_.pop(); return e;
+}
 ```
-> Gợi ý thuật toán `pop`:
-> ```
-> nếu !cv_.wait_for(lk, ms, [&]{ return !q_.empty(); })  → return nullopt
-> Event e = std::move(q_.front()); q_.pop(); return e;
-> ```
-> TODO(you): vì sao dùng predicate trong wait_for thay vì wait_for trần? (gợi ý: spurious wakeup — đây là chỗ Claude soi).
+> **TODO(you):** vì sao predicate trong `wait_for` thay vì `wait_for` trần? (spurious wakeup). Đây là chỗ Claude soi.
 
-### 5.3 `common/Logger.hpp` — *skeleton*
+---
+
+### 5.3 `common/Logger.hpp`
+
+**Bản chất.** **Bọc mỏng để cô lập phụ thuộc** — phần còn lại của app chỉ gọi `spdlog::info/...` (hoặc macro của bạn), còn việc *cấu hình* (level, pattern, sau này async/sink) gom vào một `init()`. Đổi backend log về sau = sửa một chỗ. Không thêm logic, chỉ thêm điểm cấu hình.
+
+**API toolbox** (spdlog):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `spdlog::level::from_str("info")` | Đổi chuỗi config → enum level | chuỗi sai → trả `off`, nên validate |
+| `spdlog::set_level(lvl)` | Đặt ngưỡng log toàn cục | dưới ngưỡng bị bỏ |
+| `spdlog::set_pattern("...")` | Định dạng dòng log | đặt 1 lần ở `init` |
+| `spdlog::info/warn/error(...)` | Ghi log (dùng trực tiếp khắp app) | tránh trong hot loop (xem §6) |
+
+**Pseudo:**
 ```cpp
-#pragma once
-#include <spdlog/spdlog.h>
-namespace bbb {
 struct Logger {
-    static void init(const std::string& level /*, pattern */) {
-        // TODO(you): spdlog::set_level từ string; set_pattern
+    static void init(const std::string& level) {
+        spdlog::set_level(spdlog::level::from_str(level));   // TODO(you): validate chuỗi
+        spdlog::set_pattern(/* TODO(you): pattern có timestamp + level */);
     }
 };
-} // namespace bbb
-// dùng trực tiếp spdlog::info/warn/error ở nơi khác
 ```
 
-### 5.4 `common/Config.hpp` — *skeleton; điền parse*
-```cpp
-#pragma once
-#include "Types.hpp"
-#include <nlohmann/json.hpp>
-#include <fstream>
-namespace bbb {
-struct AppConfig {
-    std::string llmHost; int llmPort;  std::string llmPath, llmModel;
-    std::string sttHost; int sttPort;  std::string sttPath, sttModel, sttLang;
-    int connectMs = 3000, totalMs = 10000;
-    // TODO(you): GpioPinMap, audio device name, debounceMs, maxRecordSeconds...
-};
+---
 
+### 5.4 `common/Config.hpp`
+
+**Bản chất.** Biến **văn bản không tin cậy** (file JSON người dùng sửa) thành **struct đã kiểm chứng**. Hai nguyên tắc: (1) lỗi (thiếu file, JSON hỏng, thiếu trường) trả `Result<Error>` — **không crash, không throw qua biên**; (2) phân biệt trường *bắt buộc* (thiếu = lỗi) và *tuỳ chọn* (thiếu = giá trị mặc định). Đây là một biên hệ thống — mọi giá trị vào đây phải coi như có thể sai.
+
+**API toolbox** (nlohmann/json):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `nlohmann::json j; f >> j;` | Parse stream → cây JSON | ném `json::parse_error` khi hỏng → bọc try/catch |
+| `j.at("key").get<T>()` | Lấy trường **bắt buộc** | ném nếu thiếu key → đúng cho trường bắt buộc |
+| `j.value("key", default)` | Lấy trường **tuỳ chọn** kèm mặc định | không ném; dùng cho field optional |
+
+**Pseudo:**
+```cpp
 inline Result<AppConfig> loadConfig(const std::string& path) {
     std::ifstream f(path);
     if (!f) return Error{1, "config not found: " + path};
-    // TODO(you): nlohmann::json j; f >> j; map j → AppConfig;
-    //            bọc try/catch parse error → return Error
-    return AppConfig{};
+    try {
+        nlohmann::json j; f >> j;
+        AppConfig c;
+        // c.llmHost = j.at("llm").at("host").get<std::string>();   // bắt buộc
+        // c.connectMs = j.value("connect_ms", 3000);               // tuỳ chọn
+        return c;
+    } catch (const std::exception& e) {
+        return Error{2, std::string("config parse: ") + e.what()};
+    }
 }
-} // namespace bbb
 ```
+> **TODO(you):** chốt schema `config.json` (trường nào bắt buộc/tuỳ chọn): host/port/path cho LLM+STT, `GpioPinMap`, audio device, `debounceMs`, `maxRecordSeconds`. Trường nào thiếu thì **fail rõ ràng** thay vì chạy với giá trị rác.
+
+---
 
 ### 5.5 Khung test EventBus
 ```cpp
@@ -219,6 +228,7 @@ TEST_CASE("EventBus: nhiều producer, một consumer, không mất event") {
 - **Copy PcmBuffer vào Event** → tốn 480KB/lần. Phải `std::move`.
 - **Log trong hot loop** (audio/redraw) → gây xrun/giật. Log ở biên thôi ([coding_guide.md §8](../development/coding_guide.md)).
 - **Thêm event mới mà quên nhánh visit** → để compiler bắt bằng cách *không* có `default:` trong visit.
+- **Config throw qua biên** → app chết vì JSON hỏng. Bọc try/catch → `Result`.
 
 ---
 

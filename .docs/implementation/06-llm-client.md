@@ -2,6 +2,8 @@
 
 > Implementation guide (tiếng Việt, Rule §18). Template 7 mục — [README.md](README.md). *Giàn giáo + gợi ý.*
 >
+> **Phong cách mục 5:** mỗi hàm theo 3 lớp — **Bản chất** → **API toolbox** (tra cứu cục bộ) → **Pseudo** (chừa quyết định khó ở `TODO(you)`).
+>
 > Nền: [../knowledge/ai_server.md](../knowledge/ai_server.md) §4/§5 · [../server_setup.md](../server_setup.md) §1 · CLAUDE.md §5/§9. **Làm sau [05-stt-client.md](05-stt-client.md)** (tái dùng HttpClient base).
 
 ---
@@ -94,36 +96,63 @@ private:
 } // namespace bbb
 ```
 
-### 5.2 Thuật toán `chat`
+---
+
+### 5.2 `chat()`
+
+**Bản chất.** So với STT, đây là cùng một chu trình HTTP nhưng **đối xứng JSON-vào / JSON-ra** thay vì multipart — chính vì phần *truyền tải* (timeout/perform/RAII) giống hệt STT mà ta rút `HttpClient::post` làm base (Q4): `chat` chỉ còn lo *dựng body* và *parse*. Dùng trình dựng JSON (nlohmann) thay vì nối chuỗi tay — để nó tự escape, tránh hỏng cú pháp khi `userText` có dấu ngoặc kép. Điểm cần canh là **total timeout** dài hơn STT (LLM sinh token tuần tự) nhưng vẫn hữu hạn để giữ NFR-1.
+
+**API toolbox** (nlohmann + base):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `nlohmann::json` object + `.dump()` | Dựng body rồi serialize ra chuỗi | để nlohmann tự escape; đừng nối chuỗi tay |
+| `HttpClient::post(url, headers, body)` → `Result<string>` | Gửi POST, trả body hoặc Error (base lo timeout/RAII) | header `Content-Type: application/json` |
+
+**Pseudo:**
 ```
-body = json{
-   "model": cfg.model,
-   "messages": [ {role:system, content:cfg.systemPrompt},
-                 {role:user,   content:userText} ],
-   "max_tokens": cfg.maxTokens, "temperature": cfg.temperature
-}.dump()
-url = "http://"+host+":"+port+path
-resp = http_.post(url, {"Content-Type: application/json"}, body)   // base lo timeout/RAII
-nếu resp là Error → return Error
-return parseBody(get<string>(resp))
+body = json{ "model": cfg.model,
+             "messages": [ {role:"system", content:cfg.systemPrompt},
+                           {role:"user",   content:userText} ],
+             "max_tokens": cfg.maxTokens, "temperature": cfg.temperature }.dump()
+url  = "http://{host}:{port}{path}"
+resp = http_.post(url, {"Content-Type: application/json"}, body)
+resp là Error → return Error                  // truyền tải (server off/timeout)
+return parseBody(std::get<std::string>(resp)) // ứng dụng
 ```
 
-### 5.3 Thuật toán `parseBody`
+---
+
+### 5.3 `parseBody()`
+
+**Bản chất.** Response LLM **lồng sâu** (`choices[0].message.content`) và *không đảm bảo có mặt* — server lỗi có thể trả `choices` rỗng hoặc đổi schema. Nguyên tắc: **truy cập phòng thủ**, thiếu field thì trả `Error`, **không để ném** lan ra worker. Tách `static` ⇒ test bằng chuỗi cố định, không cần mạng.
+
+**API toolbox** (nlohmann):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `json::parse(body)` | Chuỗi → cây JSON | ném `parse_error` → bọc try/catch |
+| `j.contains("k")` / `arr.empty()` | Kiểm tồn tại trước khi truy cập | thiếu kiểm = ném/UB khi méo |
+| `j.at(...).get<std::string>()` | Lấy giá trị có kiểm | `at` ném nếu thiếu → nằm trong try |
+
+**Pseudo:**
 ```
 try:
    j = json::parse(body)
    nếu !j.contains("choices") || j["choices"].empty() → return Error{...}
-   return j["choices"][0]["message"]["content"].get<string>()
-catch parse/type error → return Error{...}
+   return j["choices"][0].at("message").at("content").get<string>()
+catch (json::exception) → return Error{...}
 ```
-> TODO(you): viết `parseBody` chịu được response méo (thiếu field). Đây là phần test được **không cần mạng** — viết test trước.
+> **TODO(you):** viết `parseBody` chịu được response méo (thiếu field, choices rỗng). Test trước (không cần mạng).
+
+---
 
 ### 5.4 Khung test
 ```cpp
 TEST_CASE("LLM parseBody: content + response méo") {
-    CHECK(get<std::string>(LlmClient::parseBody(
+    CHECK(std::get<std::string>(LlmClient::parseBody(
         R"({"choices":[{"message":{"content":"hi"}}]})")) == "hi");
-    // TODO(you): assert response thiếu "choices" → trả Error, không ném
+    // TODO(you): assert response thiếu "choices" → trả Error (nhánh Error), không ném
 }
 ```
 
@@ -135,6 +164,7 @@ TEST_CASE("LLM parseBody: content + response méo") {
 - **Parse cứng `choices[0]`** không kiểm rỗng → crash khi response lỗi.
 - **max_tokens lớn + câu dài** → vượt NFR-1. System prompt "trả lời ngắn".
 - **Gọi main thread** → UI đứng. Worker thread.
+- **Nối JSON body bằng chuỗi tay** → hỏng khi text có `"`. Dùng nlohmann dump.
 - **Lặp code với STT** → rút HttpClient base.
 
 ---

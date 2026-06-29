@@ -24,11 +24,13 @@ Mỗi guide có cấu trúc cố định:
 | 2. **Hợp đồng** | interface chính xác, thread, mô hình lỗi (trích architecture.md) | nắm contract, không đổi tùy tiện |
 | 3. **Quyết định trước khi code** | các lựa chọn + đánh đổi (Socratic, đáp án ẩn) | tự trả lời trước khi mở đáp án |
 | 4. **Trình tự dựng** | từng bước, mỗi bước có "done-when" | làm tuần tự, không nhảy cóc |
-| 5. **Khung code tự điền** | skeleton + chữ ký + `TODO(you)` + pseudo-code + khung test | điền phần thân, làm test pass |
+| 5. **Khung code tự điền** | skeleton + chữ ký; mỗi hàm theo 3 lớp **Bản chất → API toolbox (cục bộ) → Pseudo** + `TODO(you)`; khung test | điền phần thân, làm test pass |
 | 6. **Cạm bẫy** | lỗi đặc thù component (trích troubleshooting.md) | tránh trước khi vấp |
 | 7. **Checkpoint review** | tiêu chí xong + đưa gì cho Claude + hỏi câu gì | tự kiểm, rồi nhờ review |
 
 > Kỷ luật: ở mục 3, **tự viết câu trả lời ra trước** rồi mới mở `<details>` đối chiếu. Học nằm ở khoảng cách giữa hai câu trả lời.
+>
+> **Mục 5 — phong cách 3 lớp mỗi hàm** (xem [01-gpio-hal.md](01-gpio-hal.md) làm mẫu): (1) **Bản chất** — bài toán & hướng giải framework-agnostic; (2) **API toolbox** cục bộ ngay tại hàm — bảng `hàm → công dụng → gotcha`, chỉ API hàm đó dùng, để khỏi mất công nghiên cứu; (3) **Pseudo** ghép lại, chừa quyết định khó ở `TODO(you)`. Đưa sẵn từ vựng (API), giữ lại ngữ pháp & bài toán (tư duy).
 
 ---
 
@@ -39,7 +41,7 @@ Mỗi guide có cấu trúc cố định:
 | # | Guide | Component | Phase | Phụ thuộc |
 |---|-------|-----------|-------|-----------|
 | 00 | [00-common.md](00-common.md) | EventBus, Logger, Config, Types | A | — |
-| 01 | [01-gpio-hal.md](01-gpio-hal.md) | IGpioHal + GpiodHal + Mock | A | Types |
+| 01 | [01-gpio-hal.md](01-gpio-hal.md) | IGpioHal + GpioHal + Mock | A | Types |
 | 02 | [02-audio-hal.md](02-audio-hal.md) | IAudioHal + AlsaAudioHal + Mock | B | Types |
 | 03 | [03-display-hal.md](03-display-hal.md) | IDisplayHal + FbDisplayHal | B | Types |
 | 04 | [04-audio-pipeline.md](04-audio-pipeline.md) | AudioPipeline (FR-8, gain) | B | IAudioHal, EventBus |

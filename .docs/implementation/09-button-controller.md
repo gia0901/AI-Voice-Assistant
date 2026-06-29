@@ -2,6 +2,8 @@
 
 > Implementation guide (tiếng Việt, Rule §18). Template 7 mục — [README.md](README.md). *Giàn giáo + gợi ý.* Component nhỏ — guide ngắn.
 >
+> **Phong cách mục 5:** **Bản chất** → **API toolbox** (tra cứu cục bộ) → **Pseudo** (chừa quyết định khó ở `TODO(you)`).
+>
 > Nền: [../development/app_layer.md](../development/app_layer.md) §4 · [01-gpio-hal.md](01-gpio-hal.md)
 
 ---
@@ -13,7 +15,7 @@ Chạy GPIO thread: gọi `IGpioHal::waitEvent`, dịch `GpioEvent` thô → *ý
 - Vol± → gọi thẳng `audio.applyGain(±step)` (**không** qua FSM, không đổi state).
 
 **File:** `app/ButtonController.hpp/.cpp`.
-**Phụ thuộc:** `IGpioHal` (01), `EventBus` (00), `AudioPipeline` (04).
+**Phụ thuộc:** `IGpioHal` ([01](01-gpio-hal.md)), `EventBus` ([00](00-common.md)), `AudioPipeline` ([04](04-audio-pipeline.md)).
 
 ---
 
@@ -65,6 +67,7 @@ public:
 
 ## 5. 🧩 Khung code tự điền
 
+### 5.1 `ButtonController.hpp` — *skeleton*
 ```cpp
 #pragma once
 #include "IGpioHal.hpp"
@@ -75,30 +78,44 @@ public:
 namespace bbb {
 class ButtonController {
 public:
-    ButtonController(hal::IGpioHal* g, EventBus& bus, AudioPipeline& a, float step=0.1f)
+    ButtonController(IGpioHal* g, EventBus& bus, AudioPipeline& a, float step=0.1f)
         : gpio_(g), bus_(bus), audio_(a), step_(step) {}
     ~ButtonController(){ stop(); }
     void start();
     void stop();
 private:
     void loop();
-    hal::IGpioHal* gpio_; EventBus& bus_; AudioPipeline& audio_; float step_;
+    IGpioHal* gpio_; EventBus& bus_; AudioPipeline& audio_; float step_;
     float vol_ = 0.7f;
     std::thread th_; std::atomic<bool> running_{false};
 };
 } // namespace bbb
 ```
-Thuật toán `loop`:
+
+---
+
+### 5.2 `loop()` — dịch & định tuyến sự kiện
+
+**Bản chất.** Đây là một **router theo ngữ nghĩa**: cùng là "nút bấm" nhưng *đích đến khác nhau* tuỳ ý nghĩa — PTT là sự kiện hội thoại (phải tuần tự hoá về main qua bus, vì chạm thẳng FSM/LVGL từ thread khác là race), còn Vol± là tác động phụ tức thời (xử lý tại chỗ, không làm bẩn FSM). Phân biệt **cạnh nào mang ý nghĩa** cũng quan trọng: PTT cần *cả* Press và Release (giữ-để-thu); Vol chỉ tính Press (1 nhấn = 1 bước, không nhân đôi ở Release). Thread chạy vòng blocking-wait có timeout → vừa ít tốn CPU vừa dừng được hợp tác (như [04](04-audio-pipeline.md)).
+
+**API toolbox** (C++ std):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `std::atomic<bool> running_` + `std::thread`/`join` | Worker huỷ hợp tác | timeout `waitEvent` ngắn để `stop()` không chờ lâu |
+| `std::clamp(v, 0.f, 1.f)` | Giới hạn gain hợp lệ | clamp sau mỗi bước, tránh trôi ngoài [0,1] |
+
+**Pseudo:**
 ```
 while running_:
     GpioEvent ev
-    nếu !gpio_->waitEvent(ev, 200ms): continue       // timeout → kiểm cờ
+    nếu !gpio_->waitEvent(ev, 200ms): continue           // timeout → kiểm cờ rồi chờ lại
     switch ev.id:
-      Ptt:    bus_.push(ButtonEvent{ ev.id, ev.edge })   // để FSM lo
+      Ptt:     bus_.push(ButtonEvent{ ev.id, ev.edge })   // CẢ Press lẫn Release → FSM lo
       VolUp:   nếu ev.edge==Press: vol_=clamp(vol_+step_,0,1); audio_.applyGain(vol_)
       VolDown: nếu ev.edge==Press: vol_=clamp(vol_-step_,0,1); audio_.applyGain(vol_)
 ```
-> TODO(you): chỉ phản ứng Vol ở cạnh Press (không Release) để 1 lần nhấn = 1 bước. PTT đẩy **cả** Press và Release (FSM cần cả hai). Đây là chỗ dễ nhầm.
+> **TODO(you):** Vol chỉ phản ứng cạnh **Press** (1 nhấn = 1 bước); PTT đẩy **cả** Press và Release (FSM cần cả hai để vào/ra LISTENING). Đây là chỗ dễ nhầm — Claude soi.
 
 ---
 

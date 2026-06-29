@@ -2,6 +2,8 @@
 
 > Implementation guide (tiếng Việt, Rule §18). Template 7 mục — [README.md](README.md). *Giàn giáo + gợi ý.* Guide cuối — ráp tất cả.
 >
+> **Phong cách mục 5:** **Bản chất** → **API toolbox** (tra cứu cục bộ) → **Pseudo** (chừa quyết định khó ở `TODO(you)`).
+>
 > Nền: [../development/app_layer.md](../development/app_layer.md) §6 · CLAUDE.md §11 (systemd), §14 (DoD)
 
 ---
@@ -62,45 +64,61 @@ Một vòng lặp main thread duy nhất gọi `fsm.handle` + `ui.tick`; mọi s
 
 ## 5. 🧩 Khung code tự điền
 
-### 5.1 `main.cpp` — *skeleton (theo app_layer §6)*
+### 5.1 `main()` — composition root + vòng đời
+
+**Bản chất.** `main` là **composition root**: nơi *duy nhất* biết các lớp cụ thể (`AlsaAudioHal`, `FbDisplayHal`…) và lắp chúng vào nhau; mọi tầng khác chỉ thấy interface. Hai trách nhiệm sống còn: (1) **init là chuỗi có thể fail nửa chừng** — phần cứng/PC có thể chưa sẵn sàng, nên fail phải dẫn vào **ERROR state hiển thị được**, *không* crash/chặn boot (NFR-3); (2) **vòng đời đối xứng** — thứ tự `stop()`/join lúc tắt phải đảm bảo **không thread nào còn push lên bus sau khi loop đã thoát**, nếu không là use-after-free. Bản thân vòng lặp main rất mỏng: `pop → handle → tick`.
+
+**API toolbox** (POSIX + C++ std):
+
+| API | Công dụng | Gotcha |
+|-----|-----------|--------|
+| `std::get_if<Error>(&result)` / `std::get<T>` | Rẽ nhánh `Result<T>` | kiểm Error trước khi `get<T>` |
+| `sigaction(SIGTERM/SIGINT, ...)` | Đăng ký handler tắt | trong handler **chỉ** set `std::atomic<bool>` — async-signal-safe |
+| `std::atomic<bool> running` | Cờ dừng main loop, set từ handler | dùng `volatile sig_atomic_t`/atomic, không làm gì nặng trong handler |
+| `EventBus::pop(timeoutMs)` + `lv_timer_handler` | Nhịp main loop | timeout ngắn (~10ms) để UI mượt |
+
+**Pseudo:**
 ```cpp
 int main() {
-    auto cfgR = bbb::loadConfig("/etc/bbb-va/config.json");
-    if (auto* e = std::get_if<bbb::Error>(&cfgR)) { /* TODO: log + exit */ }
-    auto cfg = std::get<bbb::AppConfig>(cfgR);
-    bbb::Logger::init("info");
+    auto cfgR = loadConfig("/etc/bbb-va/config.json");
+    if (auto* e = std::get_if<Error>(&cfgR)) { /* TODO: log + exit !=0 */ }
+    auto cfg = std::get<AppConfig>(cfgR);
+    Logger::init("info");
 
-    bbb::EventBus bus;
-    bbb::hal::AlsaAudioHal audio(cfg.audioDevice);
-    bbb::hal::FbDisplayHal disp;
-    bbb::hal::GpiodHal     gpio;
-    bbb::LvglUi   ui(&disp);
-    bbb::AudioPipeline pipe(&audio, bus, cfg.maxRecordSeconds);
-    bbb::NetWorkers    net(cfg, bus);          // STT+LLM, 2 thread
-    bbb::TtsEngine     tts;
-    bbb::StateMachine  fsm(bus, ui, pipe, net, tts /*, audio*/);
-    bbb::ButtonController buttons(&gpio, bus, pipe);
+    EventBus bus;
+    AlsaAudioHal audio(cfg.audioDevice);
+    FbDisplayHal disp;
+    GpioHal      gpio;
+    LvglUi   ui(&disp);
+    AudioPipeline pipe(&audio, bus, cfg.maxRecordSeconds);
+    NetWorkers    net(cfg, bus);            // STT+LLM, 2 thread
+    TtsEngine     tts;
+    StateMachine  fsm(bus, ui, pipe, net, tts);
+    ButtonController buttons(&gpio, bus, pipe);
 
-    // TODO(you): init theo thứ tự; fail nào → fsm.transitionTo(Error) + showError
-    ui.init(); /* disp.init / gpio.init(cfg.pins) ... kiểm mã trả về */
-    fsm.transitionTo(bbb::State::Init);
-    /* ... */ fsm.transitionTo(bbb::State::Idle);
+    // init theo thứ tự; mỗi init fail → fsm.transitionTo(Error) + ui.showError(lý do)
+    ui.init(); /* disp.init() / gpio.init(cfg.pins) ... kiểm MÃ TRẢ VỀ */
+    fsm.transitionTo(State::Init);  /* ... */  fsm.transitionTo(State::Idle);
 
-    buttons.start();                            // GPIO thread
-    installSignalHandlers();                    // SIGTERM/SIGINT → running=false
+    buttons.start();                          // GPIO thread
+    installSignalHandlers();                  // SIGTERM/SIGINT → running=false
 
     while (running) {
         if (auto ev = bus.pop(10)) fsm.handle(*ev);
-        ui.tick();                              // lv_timer_handler
+        ui.tick();
     }
-
-    buttons.stop(); pipe.stop(); net.stop();    // join sạch
+    buttons.stop(); pipe.stop(); net.stop();  // join TRƯỚC khi object hủy
     return 0;
 }
 ```
-> TODO(you): `installSignalHandlers` chỉ set một `std::atomic<bool> running` (async-signal-safe, **không** làm gì nặng trong handler). Thứ tự stop/join để không thread nào còn push sau khi loop thoát. Đây là chỗ Claude soi.
+> **TODO(you):** `installSignalHandlers` chỉ set `std::atomic<bool> running` (async-signal-safe — **không** log/malloc trong handler). Sắp thứ tự `stop()`/join sao cho không thread nào push sau khi loop thoát. Chỗ Claude soi.
+
+---
 
 ### 5.2 systemd unit — `scripts/bbb-voice-assistant.service`
+
+**Bản chất.** systemd biến binary thành **dịch vụ có vòng đời do OS quản**: tự chạy lúc boot, tự restart khi crash, dừng bằng SIGTERM (khớp §5.1), log vào journald. `After=`/`Wants=` khai báo *thứ tự phụ thuộc* (mạng, âm thanh) — nhưng "mạng có" không bằng "PC server có", nên app vẫn phải tự chịu được server chưa sẵn sàng (Q4).
+
 ```ini
 [Unit]
 Description=BBB Voice Assistant
@@ -111,19 +129,19 @@ Wants=network-online.target
 ExecStart=/usr/local/bin/bbb-voice-assistant
 Restart=on-failure
 RestartSec=2
-# User=gia            # nếu cần quyền gpio/audio: thêm group phù hợp
+# User=gia            # cần group gpio/audio để truy cập phần cứng
 
 [Install]
 WantedBy=multi-user.target
 ```
-> TODO(you): chọn `User=`/group cho quyền GPIO+audio; đường dẫn config (`/etc/bbb-va/config.json`); `deploy.sh` copy binary + unit + `daemon-reload` + restart (CLAUDE.md §11).
+> **TODO(you):** chọn `User=`/group cho quyền GPIO+audio; đường dẫn config (`/etc/bbb-va/config.json`); `deploy.sh` copy binary + unit + `daemon-reload` + restart (CLAUDE.md §11).
 
 ---
 
 ## 6. ⚠️ Cạm bẫy (CLAUDE.md §9, §14)
 
 - **Init fail làm crash/chặn boot** → phải vào ERROR, không panic.
-- **Không join thread khi thoát** → thread treo, `systemctl stop` chậm/treo.
+- **Không join thread khi thoát** → thread treo, `systemctl stop` chậm/treo; hoặc push lên bus đã hủy → UB.
 - **Làm việc nặng trong signal handler** → UB. Chỉ set atomic flag.
 - **Service thiếu quyền gpio/audio** → chạy tay được, dưới systemd fail. Set User/group.
 - **`config.json` không deploy kèm** → service start rồi chết. Deploy cùng binary.

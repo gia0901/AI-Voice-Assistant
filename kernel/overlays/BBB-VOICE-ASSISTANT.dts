@@ -92,10 +92,10 @@
 
                 /* X-plate resistance (ohms). Used to compute touch pressure Rt; also sets
                  * sensitivity. ~600 is typical for XPT2046 panels — tune per module. */
-                ti,x-plate-ohms      = /bits/ 16 <600>;
+                /*ti,x-plate-ohms      = /bits/ 16 <600>; */
                 /* Max accepted pressure. Samples with Rt above this are dropped as a light/
                  * spurious touch, so a finger press registers but noise does not. */
-                ti,pressure-max      = /bits/ 16 <255>;
+                ti,pressure-max      = /bits/ 16 <65535>;
                 /* Debounce: take up to <max> samples per point... */
                 ti,debounce-max      = /bits/ 16 <10>;
                 /* ...reject the point if consecutive samples differ by more than <tol>... */
